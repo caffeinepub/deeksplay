@@ -1,11 +1,13 @@
-import { ListMusic, Music, Plus, Trash2, X } from "lucide-react";
+import { ListMusic, Loader2, Music, Plus, Trash2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   useCreatePlaylist,
   useDeletePlaylist,
   usePlaylists,
 } from "../../hooks/useQueries";
+import { useRecentPlaylists } from "../../hooks/useRecentPlaylists";
 import type { Song } from "../../types/music";
 import { SongRow } from "../SongRow";
 
@@ -23,6 +25,7 @@ export function PlaylistsPage({
   const { data: playlists = [], isLoading } = usePlaylists();
   const createPlaylist = useCreatePlaylist();
   const deletePlaylist = useDeletePlaylist();
+  const { addRecentPlaylist } = useRecentPlaylists();
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -31,14 +34,24 @@ export function PlaylistsPage({
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    await createPlaylist.mutateAsync(newName.trim());
-    setNewName("");
-    setCreating(false);
+    try {
+      await createPlaylist.mutateAsync(newName.trim());
+      setNewName("");
+      setCreating(false);
+      toast.success("Playlist ban gayi! 🎵");
+    } catch {
+      toast.error("Playlist create nahi hui, dobara try karo!");
+    }
   };
 
   const handleStartCreating = () => {
     setCreating(true);
     setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const handleSelectPlaylist = (pl: any) => {
+    addRecentPlaylist(pl);
+    setSelectedId(selectedId === pl.id ? null : pl.id);
   };
 
   const selected = playlists.find((p: any) => p.id === selectedId);
@@ -96,14 +109,21 @@ export function PlaylistsPage({
             data-ocid="playlist.submit_button"
             onClick={handleCreate}
             disabled={createPlaylist.isPending}
-            className="px-4 py-1.5 rounded-full text-sm font-semibold transition-all hover:scale-105"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             style={{
               background: "rgba(35,230,226,0.15)",
               border: "1px solid rgba(35,230,226,0.5)",
               color: "#23E6E2",
             }}
           >
-            Create
+            {createPlaylist.isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Creating...
+              </>
+            ) : (
+              "Create"
+            )}
           </button>
           <button
             type="button"
@@ -162,7 +182,7 @@ export function PlaylistsPage({
                     ? "1px solid rgba(35,230,226,0.5)"
                     : undefined,
               }}
-              onClick={() => setSelectedId(selectedId === pl.id ? null : pl.id)}
+              onClick={() => handleSelectPlaylist(pl)}
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
@@ -193,6 +213,7 @@ export function PlaylistsPage({
                   onClick={(e) => {
                     e.stopPropagation();
                     deletePlaylist.mutate(pl.id);
+                    toast.success("Playlist delete ho gayi!");
                   }}
                   className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
                   style={{ color: "#9AA6B2" }}

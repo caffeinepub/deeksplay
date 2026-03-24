@@ -76,21 +76,21 @@ export function SongRow({
         </p>
       </div>
       {isActive && isPlaying && <Equalizer isPlaying size="sm" />}
+      {onToggleFavorite && (
+        <button
+          type="button"
+          data-ocid={`${ocidPrefix}.toggle.${index + 1}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(song);
+          }}
+          className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110 flex-shrink-0"
+          style={{ color: isFavorite ? "#FF4FD8" : "#9AA6B2" }}
+        >
+          <Heart size={14} fill={isFavorite ? "#FF4FD8" : "none"} />
+        </button>
+      )}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {onToggleFavorite && (
-          <button
-            type="button"
-            data-ocid={`${ocidPrefix}.toggle.${index + 1}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavorite(song);
-            }}
-            className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
-            style={{ color: isFavorite ? "#FF4FD8" : "#9AA6B2" }}
-          >
-            <Heart size={14} fill={isFavorite ? "#FF4FD8" : "none"} />
-          </button>
-        )}
         {onAddToPlaylist && (
           <button
             type="button"

@@ -55,11 +55,10 @@ function AppContent() {
   }, [currentSong?.id]);
 
   const handleToggleFavorite = async (song: Song) => {
+    const isCurrentlyFav = favorites.some((f) => f.id === song.id);
     await toggleFavorite.mutateAsync(song);
     toast.success(
-      favorites.some((f) => f.id === song.id)
-        ? "Removed from favorites"
-        : "Added to favorites!",
+      isCurrentlyFav ? "Removed from favorites" : "Added to favorites! ❤️",
     );
   };
 
@@ -108,6 +107,7 @@ function AppContent() {
                     favorites={favorites}
                     onToggleFavorite={handleToggleFavorite}
                     onAddToPlaylist={setAddToPlaylistSong}
+                    onNavigateToPlaylists={() => setActivePage("playlists")}
                   />
                 )}
                 {activePage === "explore" && (

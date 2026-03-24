@@ -1,9 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Song } from "../types/music";
-import { useActor } from "./useActor";
 
 const YT_API_KEY = "AIzaSyAK_oUtuutw46grbpCUx484TiXQEXtvOUc";
 
+// ─── localStorage helpers ────────────────────────────────────────────────────
+const LS_FAVORITES = "deeksplay_favorites";
+const LS_PLAYLISTS = "deeksplay_playlists";
+const LS_RECENTLY_PLAYED = "deeksplay_recently_played";
+const LS_PLAYLIST_NEXT_ID = "deeksplay_playlist_next_id";
+
+function lsGet<T>(key: string, fallback: T): T {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? (JSON.parse(val) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function lsSet<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+// ─── YouTube search ──────────────────────────────────────────────────────────
 export function useSearchYouTube(query: string) {
   return useQuery({
     queryKey: ["yt-search", query],
@@ -60,115 +81,135 @@ export function useTrendingMusic() {
   });
 }
 
+// ─── Recently Played (localStorage) ─────────────────────────────────────────
 export function useRecentlyPlayed() {
-  const { actor, isFetching } = useActor();
   return useQuery({
     queryKey: ["recently-played"],
-    queryFn: async () => {
-      if (!actor) return [];
-      try {
-        const result = await (actor as any).getRecentlyPlayed();
-        return (result as Song[]) || [];
-      } catch {
-        return [];
-      }
-    },
-    enabled: !!actor && !isFetching,
-  });
-}
-
-export function useFavorites() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["favorites"],
-    queryFn: async () => {
-      if (!actor) return [];
-      try {
-        const result = await (actor as any).getFavorites();
-        return (result as Song[]) || [];
-      } catch {
-        return [];
-      }
-    },
-    enabled: !!actor && !isFetching,
-  });
-}
-
-export function usePlaylists() {
-  const { actor, isFetching } = useActor();
-  return useQuery({
-    queryKey: ["playlists"],
-    queryFn: async () => {
-      if (!actor) return [];
-      try {
-        const result = await (actor as any).getPlaylists();
-        return result || [];
-      } catch {
-        return [];
-      }
-    },
-    enabled: !!actor && !isFetching,
+    queryFn: async () => lsGet<Song[]>(LS_RECENTLY_PLAYED, []),
+    staleTime: 0,
   });
 }
 
 export function useAddRecentlyPlayed() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (song: Song) => {
-      if (!actor) return;
-      await (actor as any).addRecentlyPlayed(song);
+      const current = lsGet<Song[]>(LS_RECENTLY_PLAYED, []);
+      const filtered = current.filter((s) => s.id !== song.id);
+      const limited = [song, ...filtered].slice(0, 20);
+      lsSet(LS_RECENTLY_PLAYED, limited);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["recently-played"] }),
   });
 }
 
+// ─── Favorites (localStorage) ────────────────────────────────────────────────
+export function useFavorites() {
+  return useQuery({
+    queryKey: ["favorites"],
+    queryFn: async () => lsGet<Song[]>(LS_FAVORITES, []),
+    staleTime: 0,
+  });
+}
+
 export function useToggleFavorite() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (song: Song) => {
-      if (!actor) return;
-      await (actor as any).toggleFavorite(song);
+      const current = lsGet<Song[]>(LS_FAVORITES, []);
+      const exists = current.some((s) => s.id === song.id);
+      if (exists) {
+        lsSet(
+          LS_FAVORITES,
+          current.filter((s) => s.id !== song.id),
+        );
+        return false;
+      }
+      lsSet(LS_FAVORITES, [...current, song]);
+      return true;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["favorites"] }),
   });
 }
 
+// ─── Playlists (localStorage) ────────────────────────────────────────────────
+export interface Playlist {
+  id: string;
+  name: string;
+  songs: Song[];
+}
+
+export function usePlaylists() {
+  return useQuery({
+    queryKey: ["playlists"],
+    queryFn: async () => lsGet<Playlist[]>(LS_PLAYLISTS, []),
+    staleTime: 0,
+  });
+}
+
 export function useCreatePlaylist() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
-      if (!actor) return;
-      await (actor as any).createPlaylist(name);
+      const current = lsGet<Playlist[]>(LS_PLAYLISTS, []);
+      let nextId = lsGet<number>(LS_PLAYLIST_NEXT_ID, 1);
+      const newPlaylist: Playlist = { id: String(nextId), name, songs: [] };
+      lsSet(LS_PLAYLISTS, [...current, newPlaylist]);
+      lsSet(LS_PLAYLIST_NEXT_ID, nextId + 1);
+      return newPlaylist;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playlists"] }),
   });
 }
 
 export function useDeletePlaylist() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (playlistId: string) => {
-      if (!actor) return;
-      await (actor as any).deletePlaylist(playlistId);
+      const current = lsGet<Playlist[]>(LS_PLAYLISTS, []);
+      lsSet(
+        LS_PLAYLISTS,
+        current.filter((p) => p.id !== playlistId),
+      );
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playlists"] }),
   });
 }
 
 export function useAddSongToPlaylist() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
       playlistId,
       song,
     }: { playlistId: string; song: Song }) => {
-      if (!actor) return;
-      await (actor as any).addSongToPlaylist(playlistId, song);
+      const current = lsGet<Playlist[]>(LS_PLAYLISTS, []);
+      const updated = current.map((p) => {
+        if (p.id !== playlistId) return p;
+        const alreadyIn = p.songs.some((s) => s.id === song.id);
+        if (alreadyIn) return p;
+        return { ...p, songs: [...p.songs, song] };
+      });
+      lsSet(LS_PLAYLISTS, updated);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["playlists"] }),
+  });
+}
+
+export function useRemoveSongFromPlaylist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      playlistId,
+      songId,
+    }: { playlistId: string; songId: string }) => {
+      const current = lsGet<Playlist[]>(LS_PLAYLISTS, []);
+      const updated = current.map((p) =>
+        p.id === playlistId
+          ? { ...p, songs: p.songs.filter((s) => s.id !== songId) }
+          : p,
+      );
+      lsSet(LS_PLAYLISTS, updated);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playlists"] }),
   });

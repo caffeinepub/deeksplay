@@ -1,8 +1,15 @@
-import { ChevronLeft, ChevronRight, Clock, TrendingUp } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  ListMusic,
+  TrendingUp,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { useRef } from "react";
 import { usePlayer } from "../../context/PlayerContext";
 import { useRecentlyPlayed, useTrendingMusic } from "../../hooks/useQueries";
+import { useRecentPlaylists } from "../../hooks/useRecentPlaylists";
 import type { Song } from "../../types/music";
 import { SongCard } from "../SongCard";
 import { SongRow } from "../SongRow";
@@ -35,16 +42,19 @@ interface HomePageProps {
   onAddToPlaylist: (song: Song) => void;
   favorites: Song[];
   onToggleFavorite: (song: Song) => void;
+  onNavigateToPlaylists: () => void;
 }
 
 export function HomePage({
   onAddToPlaylist,
   favorites,
   onToggleFavorite,
+  onNavigateToPlaylists,
 }: HomePageProps) {
   const { data: trending = [], isLoading: trendingLoading } =
     useTrendingMusic();
   const { data: recentlyPlayed = [] } = useRecentlyPlayed();
+  const { recentPlaylists } = useRecentPlaylists();
   const { playSong } = usePlayer();
   const scrollRef = useRef<HTMLDivElement>(null);
   const recentScrollRef = useRef<HTMLDivElement>(null);
@@ -147,6 +157,53 @@ export function HomePage({
           ))}
         </div>
       </motion.section>
+
+      {/* Recently Played Playlists */}
+      {recentPlaylists.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <ListMusic size={18} style={{ color: "#8A5CFF" }} />
+            <h3 className="text-lg font-bold" style={{ color: "#E9EEF6" }}>
+              Recently Played Playlists
+            </h3>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {recentPlaylists.map((pl) => (
+              <motion.div
+                key={pl.id}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                data-ocid="recent_playlists.item.1"
+                onClick={onNavigateToPlaylists}
+                className="glass-card rounded-xl p-3 cursor-pointer flex items-center gap-3 transition-all"
+                style={{ border: "1px solid rgba(138,92,255,0.2)" }}
+                whileHover={{ borderColor: "rgba(138,92,255,0.5)" }}
+              >
+                <div
+                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{
+                    background: "rgba(138,92,255,0.15)",
+                    border: "1px solid rgba(138,92,255,0.3)",
+                  }}
+                >
+                  <ListMusic size={18} style={{ color: "#8A5CFF" }} />
+                </div>
+                <div className="min-w-0">
+                  <p
+                    className="font-semibold text-sm truncate"
+                    style={{ color: "#E9EEF6" }}
+                  >
+                    {pl.name}
+                  </p>
+                  <p className="text-xs" style={{ color: "#9AA6B2" }}>
+                    {pl.songCount} songs
+                  </p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Recently Played */}
       <section>
