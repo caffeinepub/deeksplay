@@ -8,6 +8,7 @@ const LS_FAVORITES = "deeksplay_favorites";
 const LS_PLAYLISTS = "deeksplay_playlists";
 const LS_RECENTLY_PLAYED = "deeksplay_recently_played";
 const LS_PLAYLIST_NEXT_ID = "deeksplay_playlist_next_id";
+const LS_SEARCH_HISTORY = "deeksplay_search_history";
 
 function lsGet<T>(key: string, fallback: T): T {
   try {
@@ -34,7 +35,11 @@ export function useSearchYouTube(query: string) {
         `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}`,
       );
       const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error.message || "YouTube API error");
+      }
       if (!data.items) return [];
+      // biome-ignore lint/suspicious/noExplicitAny: YouTube API
       return data.items.map(
         (item: any): Song => ({
           id: item.id.videoId,
@@ -51,6 +56,7 @@ export function useSearchYouTube(query: string) {
     },
     enabled: !!query.trim(),
     staleTime: 5 * 60 * 1000,
+    retry: 1,
   });
 }
 
@@ -64,6 +70,7 @@ export function useTrendingMusic() {
       const data = await res.json();
       if (!data.items) return [];
       return data.items.map(
+        // biome-ignore lint/suspicious/noExplicitAny: YouTube API
         (item: any): Song => ({
           id: item.id,
           title: item.snippet.title,
@@ -152,7 +159,7 @@ export function useCreatePlaylist() {
   return useMutation({
     mutationFn: async (name: string) => {
       const current = lsGet<Playlist[]>(LS_PLAYLISTS, []);
-      let nextId = lsGet<number>(LS_PLAYLIST_NEXT_ID, 1);
+      const nextId = lsGet<number>(LS_PLAYLIST_NEXT_ID, 1);
       const newPlaylist: Playlist = { id: String(nextId), name, songs: [] };
       lsSet(LS_PLAYLISTS, [...current, newPlaylist]);
       lsSet(LS_PLAYLIST_NEXT_ID, nextId + 1);
@@ -212,5 +219,89 @@ export function useRemoveSongFromPlaylist() {
       lsSet(LS_PLAYLISTS, updated);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["playlists"] }),
+  });
+}
+
+// ─── Search History (localStorage) ──────────────────────────────────────────
+export function useSearchHistory() {
+  return useQuery({
+    queryKey: ["search-history"],
+    queryFn: async () => lsGet<string[]>(LS_SEARCH_HISTORY, []),
+    staleTime: 0,
+  });
+}
+
+export function useAddSearchHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (query: string) => {
+      if (!query.trim()) return;
+      const current = lsGet<string[]>(LS_SEARCH_HISTORY, []);
+      const filtered = current.filter((q) => q !== query.trim());
+      lsSet(LS_SEARCH_HISTORY, [query.trim(), ...filtered].slice(0, 20));
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["search-history"] }),
+  });
+}
+
+// ─── Trending by Region ──────────────────────────────────────────────────────
+export function useTrendingByRegion(regionCode: string, query?: string) {
+  return useQuery({
+    queryKey: ["yt-trending-region", regionCode, query],
+    queryFn: async () => {
+      if (query) {
+        // Genre-specific search: do NOT use videoCategoryId filter
+        // because Punjabi/Phonk songs are often not categorized under Music (10)
+        const res = await fetch(
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}&regionCode=${regionCode}&order=viewCount`,
+        );
+        const data = await res.json();
+        if (data.error) {
+          throw new Error(data.error.message || "YouTube API error");
+        }
+        if (!data.items) return [];
+        // biome-ignore lint/suspicious/noExplicitAny: YouTube API
+        return data.items
+          .filter((item: any) => item.id?.videoId)
+          .map(
+            (item: any): Song => ({
+              id: item.id.videoId,
+              title: item.snippet.title,
+              artist: item.snippet.channelTitle,
+              thumbnail:
+                item.snippet.thumbnails?.medium?.url ||
+                item.snippet.thumbnails?.default?.url ||
+                "",
+              videoId: item.id.videoId,
+              duration: "",
+            }),
+          );
+      }
+      // Chart-based trending (India, Global) - use mostPopular videos endpoint
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&videoCategoryId=10&maxResults=20&regionCode=${regionCode}&key=${YT_API_KEY}`,
+      );
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error.message || "YouTube API error");
+      }
+      if (!data.items) return [];
+      // biome-ignore lint/suspicious/noExplicitAny: YouTube API
+      return data.items.map(
+        (item: any): Song => ({
+          id: item.id,
+          title: item.snippet.title,
+          artist: item.snippet.channelTitle,
+          thumbnail:
+            item.snippet.thumbnails?.medium?.url ||
+            item.snippet.thumbnails?.default?.url ||
+            "",
+          videoId: item.id,
+          duration: item.contentDetails?.duration || "",
+        }),
+      );
+    },
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
   });
 }
