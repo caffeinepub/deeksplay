@@ -8,6 +8,7 @@ import {
   Library,
   ListMusic,
   Plus,
+  Settings,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
@@ -39,6 +40,12 @@ const navItems = [
     color: "#8A5CFF",
     badge: "AI",
   },
+  {
+    id: "settings" as ActivePage,
+    label: "Settings",
+    icon: Settings,
+    color: "#9AA6B2",
+  },
 ];
 
 interface SidebarProps {
@@ -60,30 +67,11 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
       {/* Brand */}
       <div className="p-6 pb-4">
         <div className="flex items-center gap-3">
-          <div className="relative w-10 h-10 flex-shrink-0">
-            <div
-              className="absolute inset-0 rounded-lg"
-              style={{
-                background:
-                  "linear-gradient(135deg, #23E6E2, #8A5CFF, #FF4FD8)",
-                padding: "2px",
-              }}
-            >
-              <div
-                className="w-full h-full rounded-md flex items-center justify-center"
-                style={{ background: "#111720" }}
-              >
-                <div
-                  className="w-0 h-0"
-                  style={{
-                    borderLeft: "8px solid #23E6E2",
-                    borderTop: "5px solid transparent",
-                    borderBottom: "5px solid transparent",
-                  }}
-                />
-              </div>
-            </div>
-          </div>
+          <img
+            src="/assets/uploads/untitled8_20251128171756-019d23af-504a-75ed-bdcc-892485ede7b8-3.png"
+            alt="Deeksplay logo"
+            className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+          />
           <div>
             <h1 className="font-bold text-lg leading-tight gradient-text">
               Deeksplay

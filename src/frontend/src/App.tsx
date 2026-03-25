@@ -6,11 +6,14 @@ import { toast } from "sonner";
 
 import { AddToPlaylistModal } from "./components/AddToPlaylistModal";
 import { BottomNav } from "./components/BottomNav";
+import { DeekBot } from "./components/DeekBot";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { ParticleBackground } from "./components/ParticleBackground";
 import { Sidebar } from "./components/Sidebar";
 import { TopHeader } from "./components/TopHeader";
 import { PlayerProvider, usePlayer } from "./context/PlayerContext";
+import { ThemeProvider } from "./context/ThemeContext";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 import { AIMusicExpert } from "./components/pages/AIMusicExpert";
 import { ExplorePage } from "./components/pages/ExplorePage";
@@ -18,6 +21,7 @@ import { FavoritesPage } from "./components/pages/FavoritesPage";
 import { HomePage } from "./components/pages/HomePage";
 import { LibraryPage } from "./components/pages/LibraryPage";
 import { PlaylistsPage } from "./components/pages/PlaylistsPage";
+import { SettingsPage } from "./components/pages/SettingsPage";
 import { TrendingPage } from "./components/pages/TrendingPage";
 
 import {
@@ -42,9 +46,13 @@ function AppContent() {
   const toggleFavorite = useToggleFavorite();
   const addRecentlyPlayed = useAddRecentlyPlayed();
   const addSearchHistory = useAddSearchHistory();
-  const { currentSong } = usePlayer();
+  const player = usePlayer();
+  const { currentSong } = player;
 
   const { isFetching: isSearching } = useSearchYouTube(searchQuery);
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts(player);
 
   const addRecentRef = useRef(addRecentlyPlayed);
   addRecentRef.current = addRecentlyPlayed;
@@ -161,6 +169,7 @@ function AppContent() {
                     onAddToPlaylist={setAddToPlaylistSong}
                   />
                 )}
+                {activePage === "settings" && <SettingsPage />}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -208,6 +217,7 @@ function AppContent() {
         song={addToPlaylistSong}
         onClose={() => setAddToPlaylistSong(null)}
       />
+      <DeekBot />
       <Toaster />
     </div>
   );
@@ -216,9 +226,11 @@ function AppContent() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <PlayerProvider>
-        <AppContent />
-      </PlayerProvider>
+      <ThemeProvider>
+        <PlayerProvider>
+          <AppContent />
+        </PlayerProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

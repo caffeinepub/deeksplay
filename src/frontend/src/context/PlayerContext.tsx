@@ -16,7 +16,7 @@ declare global {
   }
 }
 
-interface PlayerContextType {
+export interface PlayerContextType {
   currentSong: Song | null;
   queue: Song[];
   isPlaying: boolean;

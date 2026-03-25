@@ -2,10 +2,14 @@ import { Bot, Loader2, Music, Send, Sparkles, User } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRef, useState } from "react";
 import { usePlayer } from "../../context/PlayerContext";
+import { deductUnits } from "../../hooks/useApiQuota";
 import type { Song } from "../../types/music";
+import {
+  getActiveApiKey,
+  isQuotaExhaustedError,
+  markCurrentKeyExhausted,
+} from "../../utils/ytApiKey";
 import { SongRow } from "../SongRow";
-
-const YT_API_KEY = "AIzaSyDySA-v4ObH1L6k7ZSRlxEd61H594H0cSI";
 
 let msgCounter = 0;
 function newId() {
@@ -214,11 +218,27 @@ function getAIResponse(input: string): { text: string; searchQuery?: string } {
 
 async function fetchSongsForQuery(query: string): Promise<Song[]> {
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=6&key=${YT_API_KEY}&q=${encodeURIComponent(query)}`,
-    );
-    const data = await res.json();
+    const buildUrl = (key: string) =>
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=6&key=${key}&q=${encodeURIComponent(query)}`;
+
+    const res1 = await fetch(buildUrl(getActiveApiKey()));
+    const data1 = await res1.json();
+
+    let data = data1;
+    if (isQuotaExhaustedError(data1)) {
+      const nextKey = markCurrentKeyExhausted();
+      if (!nextKey) return [];
+      const res2 = await fetch(buildUrl(getActiveApiKey()));
+      const data2 = await res2.json();
+      if (isQuotaExhaustedError(data2)) {
+        markCurrentKeyExhausted();
+        return [];
+      }
+      data = data2;
+    }
+
     if (!data.items || data.items.length === 0) return [];
+    deductUnits(100);
     return data.items
       .filter((item: any) => item.id?.videoId)
       .map(
@@ -344,7 +364,9 @@ export function AIMusicExpert({
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
-              className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex gap-3 ${
+                msg.role === "user" ? "justify-end" : "justify-start"
+              }`}
             >
               {msg.role === "ai" && (
                 <div
@@ -357,7 +379,9 @@ export function AIMusicExpert({
                 </div>
               )}
               <div
-                className={`max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col gap-2`}
+                className={`max-w-[80%] ${
+                  msg.role === "user" ? "items-end" : "items-start"
+                } flex flex-col gap-2`}
               >
                 <div
                   className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-line"

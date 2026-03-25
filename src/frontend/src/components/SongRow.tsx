@@ -1,6 +1,10 @@
-import { Heart, MoreHorizontal, Pause, Play, Plus } from "lucide-react";
+import { Heart, Pause, Play, Plus, Radio, Share2 } from "lucide-react";
 import { motion } from "motion/react";
+import type React from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { usePlayer } from "../context/PlayerContext";
+import { useSearchYouTube } from "../hooks/useQueries";
 import type { Song } from "../types/music";
 import { Equalizer } from "./Equalizer";
 
@@ -12,6 +16,40 @@ interface SongRowProps {
   onToggleFavorite?: (song: Song) => void;
   onAddToPlaylist?: (song: Song) => void;
   ocidPrefix?: string;
+}
+
+function ArtistRadioButton({ song }: { song: Song }) {
+  const { playSong } = usePlayer();
+  const [query, setQuery] = useState("");
+  const { data: results } = useSearchYouTube(query);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional - trigger only when results arrive
+  useEffect(() => {
+    if (results && results.length > 0 && query) {
+      playSong(results[0], results);
+      toast.success(`📻 Artist Radio: ${song.artist}`);
+      setQuery("");
+    }
+  }, [results]);
+
+  const startRadio = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toast.loading(`Loading ${song.artist} radio...`, { id: "radio" });
+    setQuery(`${song.artist} songs`);
+    setTimeout(() => toast.dismiss("radio"), 3000);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={startRadio}
+      title={`${song.artist} Radio`}
+      className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
+      style={{ color: "#9AA6B2" }}
+    >
+      <Radio size={13} />
+    </button>
+  );
 }
 
 export function SongRow({
@@ -29,6 +67,14 @@ export function SongRow({
   const handlePlay = () => {
     if (isActive) togglePlay();
     else playSong(song, queue);
+  };
+
+  const handleShare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(
+      `https://youtube.com/watch?v=${song.videoId}`,
+    );
+    toast.success("Link copied! 🔗");
   };
 
   return (
@@ -91,6 +137,16 @@ export function SongRow({
         </button>
       )}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <ArtistRadioButton song={song} />
+        <button
+          type="button"
+          onClick={handleShare}
+          title="Share"
+          className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
+          style={{ color: "#9AA6B2" }}
+        >
+          <Share2 size={13} />
+        </button>
         {onAddToPlaylist && (
           <button
             type="button"
@@ -109,11 +165,6 @@ export function SongRow({
           {song.duration || ""}
         </span>
       </div>
-      <MoreHorizontal
-        size={14}
-        className="opacity-0 group-hover:opacity-100 flex-shrink-0"
-        style={{ color: "#9AA6B2" }}
-      />
     </motion.div>
   );
 }

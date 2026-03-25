@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Song } from "../types/music";
-
-const YT_API_KEY = "AIzaSyDySA-v4ObH1L6k7ZSRlxEd61H594H0cSI";
+import {
+  getActiveApiKey,
+  isQuotaExhaustedError,
+  markCurrentKeyExhausted,
+} from "../utils/ytApiKey";
+import { deductUnits } from "./useApiQuota";
 
 // ─── localStorage helpers ────────────────────────────────────────────────────
 const LS_FAVORITES = "deeksplay_favorites";
@@ -25,34 +29,78 @@ function lsSet<T>(key: string, value: T): void {
   } catch {}
 }
 
+// ─── Quota-aware fetch helper ─────────────────────────────────────────────────
+async function ytFetch(buildUrl: (key: string) => string): Promise<any> {
+  const url1 = buildUrl(getActiveApiKey());
+  const res1 = await fetch(url1);
+  const data1 = await res1.json();
+  if (isQuotaExhaustedError(data1)) {
+    const nextKey = markCurrentKeyExhausted();
+    if (!nextKey) {
+      throw new Error(
+        "Saari YouTube API keys ka quota khatam ho gaya. Kal ~12:30 AM IST pe reset hoga.",
+      );
+    }
+    const url2 = buildUrl(getActiveApiKey());
+    const res2 = await fetch(url2);
+    const data2 = await res2.json();
+    if (isQuotaExhaustedError(data2)) {
+      markCurrentKeyExhausted();
+      throw new Error(
+        "Saari YouTube API keys ka quota khatam ho gaya. Kal ~12:30 AM IST pe reset hoga.",
+      );
+    }
+    if (data2.error)
+      throw new Error(data2.error.message || "YouTube API error");
+    return data2;
+  }
+  if (data1.error) throw new Error(data1.error.message || "YouTube API error");
+  return data1;
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: YouTube API
+function mapSearchItem(item: any): Song {
+  return {
+    id: item.id.videoId,
+    title: item.snippet.title,
+    artist: item.snippet.channelTitle,
+    thumbnail:
+      item.snippet.thumbnails?.medium?.url ||
+      item.snippet.thumbnails?.default?.url ||
+      "",
+    videoId: item.id.videoId,
+    duration: "",
+  };
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: YouTube API
+function mapVideoItem(item: any): Song {
+  return {
+    id: item.id,
+    title: item.snippet.title,
+    artist: item.snippet.channelTitle,
+    thumbnail:
+      item.snippet.thumbnails?.medium?.url ||
+      item.snippet.thumbnails?.default?.url ||
+      "",
+    videoId: item.id,
+    duration: item.contentDetails?.duration || "",
+  };
+}
+
 // ─── YouTube search ──────────────────────────────────────────────────────────
 export function useSearchYouTube(query: string) {
   return useQuery({
     queryKey: ["yt-search", query],
     queryFn: async () => {
       if (!query.trim()) return [];
-      const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}`,
+      const data = await ytFetch(
+        (key) =>
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${key}&q=${encodeURIComponent(query)}`,
       );
-      const data = await res.json();
-      if (data.error) {
-        throw new Error(data.error.message || "YouTube API error");
-      }
       if (!data.items) return [];
-      // biome-ignore lint/suspicious/noExplicitAny: YouTube API
-      return data.items.map(
-        (item: any): Song => ({
-          id: item.id.videoId,
-          title: item.snippet.title,
-          artist: item.snippet.channelTitle,
-          thumbnail:
-            item.snippet.thumbnails?.medium?.url ||
-            item.snippet.thumbnails?.default?.url ||
-            "",
-          videoId: item.id.videoId,
-          duration: "",
-        }),
-      );
+      deductUnits(100);
+      return data.items.map(mapSearchItem);
     },
     enabled: !!query.trim(),
     staleTime: 5 * 60 * 1000,
@@ -64,25 +112,12 @@ export function useTrendingMusic() {
   return useQuery({
     queryKey: ["yt-trending"],
     queryFn: async () => {
-      const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&videoCategoryId=10&maxResults=20&key=${YT_API_KEY}`,
+      const data = await ytFetch(
+        (key) =>
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&videoCategoryId=10&maxResults=20&key=${key}`,
       );
-      const data = await res.json();
       if (!data.items) return [];
-      return data.items.map(
-        // biome-ignore lint/suspicious/noExplicitAny: YouTube API
-        (item: any): Song => ({
-          id: item.id,
-          title: item.snippet.title,
-          artist: item.snippet.channelTitle,
-          thumbnail:
-            item.snippet.thumbnails?.medium?.url ||
-            item.snippet.thumbnails?.default?.url ||
-            "",
-          videoId: item.id,
-          duration: item.contentDetails?.duration || "",
-        }),
-      );
+      return data.items.map(mapVideoItem);
     },
     staleTime: 10 * 60 * 1000,
   });
@@ -251,54 +286,25 @@ export function useTrendingByRegion(regionCode: string, query?: string) {
     queryFn: async () => {
       if (query) {
         // Genre-specific search: do NOT use videoCategoryId filter
-        const res = await fetch(
-          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}&regionCode=${regionCode}&order=viewCount`,
+        const data = await ytFetch(
+          (key) =>
+            `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${key}&q=${encodeURIComponent(query)}&regionCode=${regionCode}&order=viewCount`,
         );
-        const data = await res.json();
-        if (data.error) {
-          throw new Error(data.error.message || "YouTube API error");
-        }
         if (!data.items) return [];
+        deductUnits(100);
         // biome-ignore lint/suspicious/noExplicitAny: YouTube API
         return data.items
           .filter((item: any) => item.id?.videoId)
-          .map(
-            (item: any): Song => ({
-              id: item.id.videoId,
-              title: item.snippet.title,
-              artist: item.snippet.channelTitle,
-              thumbnail:
-                item.snippet.thumbnails?.medium?.url ||
-                item.snippet.thumbnails?.default?.url ||
-                "",
-              videoId: item.id.videoId,
-              duration: "",
-            }),
-          );
+          .map(mapSearchItem);
       }
       // Chart-based trending (India, Global)
-      const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&videoCategoryId=10&maxResults=20&regionCode=${regionCode}&key=${YT_API_KEY}`,
+      const data = await ytFetch(
+        (key) =>
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&videoCategoryId=10&maxResults=20&regionCode=${regionCode}&key=${key}`,
       );
-      const data = await res.json();
-      if (data.error) {
-        throw new Error(data.error.message || "YouTube API error");
-      }
       if (!data.items) return [];
-      // biome-ignore lint/suspicious/noExplicitAny: YouTube API
-      return data.items.map(
-        (item: any): Song => ({
-          id: item.id,
-          title: item.snippet.title,
-          artist: item.snippet.channelTitle,
-          thumbnail:
-            item.snippet.thumbnails?.medium?.url ||
-            item.snippet.thumbnails?.default?.url ||
-            "",
-          videoId: item.id,
-          duration: item.contentDetails?.duration || "",
-        }),
-      );
+      deductUnits(100);
+      return data.items.map(mapVideoItem);
     },
     staleTime: 10 * 60 * 1000,
     retry: 1,

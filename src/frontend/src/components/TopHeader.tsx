@@ -1,6 +1,7 @@
 import { Bell, Clock, Loader2, Mic, MicOff, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useApiQuota } from "../hooks/useApiQuota";
 import { useSearchHistory } from "../hooks/useQueries";
 
 interface TopHeaderProps {
@@ -17,10 +18,26 @@ export function TopHeader({
   const [query, setQuery] = useState(searchQuery);
   const [showHistory, setShowHistory] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isVerySmall, setIsVerySmall] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data: searchHistory = [] } = useSearchHistory();
+  const { remainingUnits } = useApiQuota();
 
-  // Sync local query when external searchQuery clears
+  const quotaColor =
+    remainingUnits < 2000
+      ? "#FF4FD8"
+      : remainingUnits < 5000
+        ? "#FFB347"
+        : "#23E6E2";
+
+  // Detect very small screens (Apple Watch, <220px)
+  useEffect(() => {
+    const check = () => setIsVerySmall(window.innerWidth < 220);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   useEffect(() => {
     if (!searchQuery) setQuery("");
   }, [searchQuery]);
@@ -89,27 +106,19 @@ export function TopHeader({
 
   return (
     <header
-      className="flex items-center gap-2 md:gap-4 px-3 md:px-6 py-2 md:py-4 flex-shrink-0"
+      className="flex items-center gap-2 md:gap-4 px-3 md:px-6 py-2 md:py-3 flex-shrink-0"
       style={{ borderBottom: "1px solid rgba(42,52,65,0.5)" }}
     >
       {/* Brand logo on mobile */}
       <div className="md:hidden flex items-center gap-1.5 flex-shrink-0">
-        <div
-          className="w-7 h-7 rounded-md flex items-center justify-center"
-          style={{
-            background: "linear-gradient(135deg, #23E6E2, #8A5CFF, #FF4FD8)",
-          }}
-        >
-          <div
-            className="w-0 h-0"
-            style={{
-              borderLeft: "6px solid #0B0F14",
-              borderTop: "4px solid transparent",
-              borderBottom: "4px solid transparent",
-            }}
-          />
-        </div>
-        <span className="text-sm font-bold gradient-text">Deeksplay</span>
+        <img
+          src="/assets/uploads/untitled8_20251128171756-019d23af-504a-75ed-bdcc-892485ede7b8-3.png"
+          alt="Deeksplay logo"
+          className="w-7 h-7 rounded-md object-cover"
+        />
+        {!isVerySmall && (
+          <span className="text-sm font-bold gradient-text">Deeksplay</span>
+        )}
       </div>
 
       {/* Search area */}
@@ -144,12 +153,12 @@ export function TopHeader({
                 }
               }}
               placeholder="Search songs, artists…"
-              className="w-full pl-9 md:pl-12 pr-16 md:pr-20 py-2 md:py-3 rounded-full text-sm outline-none transition-all"
+              className="w-full pl-9 md:pl-12 pr-16 md:pr-20 py-2.5 md:py-3 rounded-full outline-none transition-all"
               style={{
                 background: "rgba(20,26,34,0.9)",
                 border: "1px solid rgba(42,52,65,0.8)",
                 color: "#E9EEF6",
-                fontSize: "16px",
+                fontSize: "clamp(14px, 4vw, 16px)",
               }}
               onFocus={(e) => {
                 e.currentTarget.style.borderColor = "rgba(35,230,226,0.6)";
@@ -162,7 +171,6 @@ export function TopHeader({
                 e.currentTarget.style.boxShadow = "none";
               }}
             />
-            {/* Buttons inside input: clear + search submit */}
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
               {query && (
                 <button
@@ -230,25 +238,42 @@ export function TopHeader({
           )}
         </form>
 
-        {/* Mic button */}
-        <button
-          type="button"
-          data-ocid="search.mic.button"
-          onClick={handleMic}
-          className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 flex-shrink-0"
-          style={{
-            background: isListening
-              ? "rgba(255,79,216,0.2)"
-              : "rgba(20,26,34,0.9)",
-            border: isListening
-              ? "1px solid rgba(255,79,216,0.7)"
-              : "1px solid rgba(42,52,65,0.8)",
-            color: isListening ? "#FF4FD8" : "#9AA6B2",
-            animation: isListening ? "pulse 1s ease-in-out infinite" : "none",
-          }}
-        >
-          {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-        </button>
+        {/* Mic button — hidden on very small screens */}
+        {!isVerySmall && (
+          <button
+            type="button"
+            data-ocid="search.mic.button"
+            onClick={handleMic}
+            className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 flex-shrink-0"
+            style={{
+              background: isListening
+                ? "rgba(255,79,216,0.2)"
+                : "rgba(20,26,34,0.9)",
+              border: isListening
+                ? "1px solid rgba(255,79,216,0.7)"
+                : "1px solid rgba(42,52,65,0.8)",
+              color: isListening ? "#FF4FD8" : "#9AA6B2",
+              animation: isListening ? "pulse 1s ease-in-out infinite" : "none",
+            }}
+          >
+            {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+        )}
+      </div>
+
+      {/* Quota pill */}
+      <div
+        data-ocid="header.quota.panel"
+        className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0 cursor-default"
+        style={{
+          background: `${quotaColor}18`,
+          border: `1px solid ${quotaColor}40`,
+          color: quotaColor,
+        }}
+        title={`${remainingUnits.toLocaleString()} API units remaining today`}
+      >
+        <span>⚡</span>
+        <span>{remainingUnits.toLocaleString()}</span>
       </div>
 
       <button
@@ -264,15 +289,11 @@ export function TopHeader({
         <Bell size={16} />
       </button>
 
-      <div
-        className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center font-bold text-xs md:text-sm flex-shrink-0"
-        style={{
-          background: "linear-gradient(135deg, #23E6E2, #8A5CFF)",
-          color: "#0B0F14",
-        }}
-      >
-        DK
-      </div>
+      <img
+        src="/assets/uploads/untitled8_20251128171756-019d23af-504a-75ed-bdcc-892485ede7b8-3.png"
+        alt="Deeksplay"
+        className="w-8 h-8 md:w-10 md:h-10 rounded-full object-cover flex-shrink-0"
+      />
     </header>
   );
 }

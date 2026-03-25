@@ -1,12 +1,4 @@
-import {
-  Bot,
-  Compass,
-  Flame,
-  Heart,
-  Home,
-  Library,
-  ListMusic,
-} from "lucide-react";
+import { Bot, Compass, Flame, Home, Settings } from "lucide-react";
 import { motion } from "motion/react";
 import type { ActivePage } from "../types/music";
 
@@ -15,7 +7,7 @@ const navItems = [
   { id: "trending" as ActivePage, label: "Trending", icon: Flame },
   { id: "explore" as ActivePage, label: "Explore", icon: Compass },
   { id: "ai-expert" as ActivePage, label: "AI", icon: Bot },
-  { id: "favorites" as ActivePage, label: "Favorites", icon: Heart },
+  { id: "settings" as ActivePage, label: "Settings", icon: Settings },
 ];
 
 interface BottomNavProps {

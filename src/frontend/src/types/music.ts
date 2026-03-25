@@ -20,4 +20,5 @@ export type ActivePage =
   | "playlists"
   | "favorites"
   | "trending"
-  | "ai-expert";
+  | "ai-expert"
+  | "settings";
