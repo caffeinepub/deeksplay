@@ -5,7 +5,7 @@ import { usePlayer } from "../../context/PlayerContext";
 import type { Song } from "../../types/music";
 import { SongRow } from "../SongRow";
 
-const YT_API_KEY = "AIzaSyAK_oUtuutw46grbpCUx484TiXQEXtvOUc";
+const YT_API_KEY = "AIzaSyDySA-v4ObH1L6k7ZSRlxEd61H594H0cSI";
 
 let msgCounter = 0;
 function newId() {
@@ -117,10 +117,8 @@ const ARTIST_QUERIES: Array<{
 function getAIResponse(input: string): { text: string; searchQuery?: string } {
   const lower = input.toLowerCase();
 
-  // Artist detection -- check all known artists first
   for (const artist of ARTIST_QUERIES) {
     if (artist.keywords.some((kw) => lower.includes(kw))) {
-      // If user also mentions rap/hip hop, add it to query
       let query = artist.query;
       if (
         lower.includes("rap") ||
@@ -133,7 +131,6 @@ function getAIResponse(input: string): { text: string; searchQuery?: string } {
     }
   }
 
-  // Mood detection
   const moodQuery = Object.entries(MOOD_QUERIES).find(([key]) =>
     lower.includes(key),
   )?.[1];
@@ -209,7 +206,6 @@ function getAIResponse(input: string): { text: string; searchQuery?: string } {
     };
   }
 
-  // Default: search with original query
   return {
     text: `Yeh lo -- "${input.trim().slice(0, 30)}" ke liye best songs 🎵`,
     searchQuery: input.trim(),
@@ -292,7 +288,6 @@ export function AIMusicExpert({
       songs = await fetchSongsForQuery(searchQuery);
     }
 
-    // If API quota exhausted or no songs, show helpful message
     const finalText =
       searchQuery && songs.length === 0
         ? `${aiText}\n\n⚠️ YouTube API quota khatam ho gayi hai. Kal ~12:30 baje IST reset hogi. Tab tak search kar sakte ho.`

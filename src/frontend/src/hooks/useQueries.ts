@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Song } from "../types/music";
 
-const YT_API_KEY = "AIzaSyAK_oUtuutw46grbpCUx484TiXQEXtvOUc";
+const YT_API_KEY = "AIzaSyDySA-v4ObH1L6k7ZSRlxEd61H594H0cSI";
 
 // ─── localStorage helpers ────────────────────────────────────────────────────
 const LS_FAVORITES = "deeksplay_favorites";
@@ -32,7 +32,7 @@ export function useSearchYouTube(query: string) {
     queryFn: async () => {
       if (!query.trim()) return [];
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}`,
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}`,
       );
       const data = await res.json();
       if (data.error) {
@@ -251,7 +251,6 @@ export function useTrendingByRegion(regionCode: string, query?: string) {
     queryFn: async () => {
       if (query) {
         // Genre-specific search: do NOT use videoCategoryId filter
-        // because Punjabi/Phonk songs are often not categorized under Music (10)
         const res = await fetch(
           `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=20&key=${YT_API_KEY}&q=${encodeURIComponent(query)}&regionCode=${regionCode}&order=viewCount`,
         );
@@ -277,7 +276,7 @@ export function useTrendingByRegion(regionCode: string, query?: string) {
             }),
           );
       }
-      // Chart-based trending (India, Global) - use mostPopular videos endpoint
+      // Chart-based trending (India, Global)
       const res = await fetch(
         `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&videoCategoryId=10&maxResults=20&regionCode=${regionCode}&key=${YT_API_KEY}`,
       );
