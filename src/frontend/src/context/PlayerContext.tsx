@@ -38,6 +38,31 @@ export interface PlayerContextType {
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
 
+const SILENT_AUDIO_SRC =
+  "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD///////////////////////////////////////////8AAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASDs90hvAAAAAAAAAAAAAAAAAAAA//sQZAAP8AAAaQAAAAgAAA0gAAABAAABpAAAACAAADSAAAAETEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
+
+function startWebAudioKeepalive(): () => void {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return () => {};
+    const ctx = new AudioCtx();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = 0.00001;
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    oscillator.start();
+    return () => {
+      try {
+        oscillator.stop();
+        ctx.close();
+      } catch (_e) {}
+    };
+  } catch (_e) {
+    return () => {};
+  }
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -52,14 +77,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<any>(null);
   const pendingSongRef = useRef<Song | null>(null);
+  const silentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const isPlayingRef = useRef(false);
+  const webAudioCleanupRef = useRef<(() => void) | null>(null);
+  const wakeLockRef = useRef<any>(null);
 
-  // Always-fresh refs to avoid stale closures in YT event callbacks
   const currentSongRef = useRef<Song | null>(null);
   const queueRef = useRef<Song[]>([]);
   const repeatModeRef = useRef<"none" | "all" | "one">("none");
   const isShuffleRef = useRef(false);
 
-  // Keep refs in sync with state
   useEffect(() => {
     currentSongRef.current = currentSong;
   }, [currentSong]);
@@ -72,6 +99,62 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     isShuffleRef.current = isShuffle;
   }, [isShuffle]);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    const audio = new Audio(SILENT_AUDIO_SRC);
+    audio.loop = true;
+    audio.volume = 0.001;
+    silentAudioRef.current = audio;
+    return () => {
+      audio.pause();
+      silentAudioRef.current = null;
+    };
+  }, []);
+
+  const requestWakeLock = useCallback(async () => {
+    if ("wakeLock" in navigator && !wakeLockRef.current) {
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request(
+          "screen",
+        );
+        wakeLockRef.current.addEventListener("release", () => {
+          wakeLockRef.current = null;
+        });
+      } catch (_e) {}
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+      } catch (_e) {}
+      wakeLockRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState === "visible") {
+        if (isPlayingRef.current && playerRef.current) {
+          try {
+            playerRef.current.playVideo();
+          } catch (_e) {}
+        }
+        if (isPlayingRef.current) await requestWakeLock();
+        silentAudioRef.current?.play().catch(() => {});
+        if (isPlayingRef.current && !webAudioCleanupRef.current) {
+          webAudioCleanupRef.current = startWebAudioKeepalive();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility);
+  }, [requestWakeLock]);
 
   useEffect(() => {
     if (window.YT?.Player) {
@@ -84,34 +167,52 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     document.head.appendChild(tag);
   }, []);
 
-  // Use a ref for playSongInternal to break circular dependency
   const playSongInternalRef = useRef<(song: Song, q: Song[]) => void>(() => {});
+  const nextSongRef = useRef<() => void>(() => {});
+  const prevSongRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    if (!currentSong || !("mediaSession" in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentSong.title,
+      artist: currentSong.artist || "Deeksplay",
+      artwork: [
+        { src: currentSong.thumbnail, sizes: "96x96", type: "image/jpeg" },
+        { src: currentSong.thumbnail, sizes: "128x128", type: "image/jpeg" },
+      ],
+    });
+    navigator.mediaSession.setActionHandler("play", () =>
+      playerRef.current?.playVideo(),
+    );
+    navigator.mediaSession.setActionHandler("pause", () =>
+      playerRef.current?.pauseVideo(),
+    );
+    navigator.mediaSession.setActionHandler("nexttrack", () =>
+      nextSongRef.current(),
+    );
+    navigator.mediaSession.setActionHandler("previoustrack", () =>
+      prevSongRef.current(),
+    );
+  }, [currentSong]);
 
   const handleSongEnd = useCallback(() => {
     const q = queueRef.current;
     const song = currentSongRef.current;
     const repeat = repeatModeRef.current;
     const shuffle = isShuffleRef.current;
-
     if (q.length === 0) return;
-
     if (repeat === "one" && song) {
       playSongInternalRef.current(song, q);
       return;
     }
-
     const currentIndex = song ? q.findIndex((s) => s.id === song.id) : -1;
-
     if (shuffle) {
-      const nextIdx = Math.floor(Math.random() * q.length);
-      playSongInternalRef.current(q[nextIdx], q);
+      playSongInternalRef.current(q[Math.floor(Math.random() * q.length)], q);
     } else {
       const nextIndex = currentIndex + 1;
-      if (nextIndex < q.length) {
-        playSongInternalRef.current(q[nextIndex], q);
-      } else if (repeat === "all" && q.length > 0) {
+      if (nextIndex < q.length) playSongInternalRef.current(q[nextIndex], q);
+      else if (repeat === "all" && q.length > 0)
         playSongInternalRef.current(q[0], q);
-      }
     }
   }, []);
 
@@ -142,29 +243,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             e.target.setVolume(volume);
             e.target.playVideo();
             setIsPlaying(true);
+            silentAudioRef.current?.play().catch(() => {});
+            if (webAudioCleanupRef.current) webAudioCleanupRef.current();
+            webAudioCleanupRef.current = startWebAudioKeepalive();
+            requestWakeLock();
           },
           onStateChange: (e: any) => {
             if (e.data === window.YT.PlayerState.PLAYING) {
               setIsPlaying(true);
               setDuration(e.target.getDuration());
               clearInterval(intervalRef.current);
-              intervalRef.current = setInterval(() => {
-                setCurrentTime(e.target.getCurrentTime());
-              }, 500);
+              intervalRef.current = setInterval(
+                () => setCurrentTime(e.target.getCurrentTime()),
+                500,
+              );
+              if ("mediaSession" in navigator)
+                navigator.mediaSession.playbackState = "playing";
+              silentAudioRef.current?.play().catch(() => {});
+              if (!webAudioCleanupRef.current)
+                webAudioCleanupRef.current = startWebAudioKeepalive();
+              requestWakeLock();
             } else if (e.data === window.YT.PlayerState.PAUSED) {
               setIsPlaying(false);
               clearInterval(intervalRef.current);
+              if ("mediaSession" in navigator)
+                navigator.mediaSession.playbackState = "paused";
+              releaseWakeLock();
             } else if (e.data === window.YT.PlayerState.ENDED) {
               setIsPlaying(false);
               clearInterval(intervalRef.current);
-              // Call via ref so we always get the latest version
+              if ("mediaSession" in navigator)
+                navigator.mediaSession.playbackState = "none";
+              releaseWakeLock();
               handleSongEndRef.current();
             }
           },
         },
       });
     },
-    [ytReady, volume],
+    [ytReady, volume, requestWakeLock, releaseWakeLock],
   );
 
   const playSongInternal = useCallback(
@@ -173,16 +290,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       currentSongRef.current = song;
       setCurrentTime(0);
       clearInterval(intervalRef.current);
-      if (ytReady) {
-        initPlayer(song.videoId);
-      } else {
-        pendingSongRef.current = song;
-      }
+      if (ytReady) initPlayer(song.videoId);
+      else pendingSongRef.current = song;
     },
     [ytReady, initPlayer],
   );
 
-  // Keep playSongInternalRef in sync
   useEffect(() => {
     playSongInternalRef.current = playSongInternal;
   }, [playSongInternal]);
@@ -206,11 +319,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const togglePlay = useCallback(() => {
     if (!playerRef.current) return;
-    if (isPlaying) {
-      playerRef.current.pauseVideo();
-    } else {
-      playerRef.current.playVideo();
-    }
+    if (isPlaying) playerRef.current.pauseVideo();
+    else playerRef.current.playVideo();
   }, [isPlaying]);
 
   const seekTo = useCallback((time: number) => {
@@ -242,12 +352,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (idx > 0) playSongInternalRef.current(q[idx - 1], q);
   }, []);
 
-  const toggleShuffle = useCallback(() => setIsShuffle((s) => !s), []);
+  useEffect(() => {
+    nextSongRef.current = nextSong;
+  }, [nextSong]);
+  useEffect(() => {
+    prevSongRef.current = prevSong;
+  }, [prevSong]);
 
+  useEffect(() => {
+    return () => {
+      if (webAudioCleanupRef.current) webAudioCleanupRef.current();
+      releaseWakeLock();
+    };
+  }, [releaseWakeLock]);
+
+  const toggleShuffle = useCallback(() => setIsShuffle((s) => !s), []);
   const toggleRepeat = useCallback(() => {
     setRepeatMode((m) => (m === "none" ? "all" : m === "all" ? "one" : "none"));
   }, []);
-
   const addToQueue = useCallback((song: Song) => {
     setQueue((q) => {
       const newQ = [...q, song];

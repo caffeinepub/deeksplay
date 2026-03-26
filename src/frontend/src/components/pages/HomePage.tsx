@@ -3,10 +3,14 @@ import {
   ChevronRight,
   Clock,
   ListMusic,
+  Pause,
   Play,
+  SkipBack,
+  SkipForward,
   TrendingUp,
+  X,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import React, { useRef, useState } from "react";
 import { toast } from "sonner";
 import { usePlayer } from "../../context/PlayerContext";
@@ -185,29 +189,481 @@ function getGreeting() {
   return "Good evening";
 }
 
+function formatTime(secs: number) {
+  if (!secs || Number.isNaN(secs)) return "0:00";
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+type FeaturedPlaylist = (typeof FEATURED_PLAYLISTS)[0];
+
+function PlaylistPopup({
+  playlist,
+  songs,
+  loading,
+  onClose,
+}: {
+  playlist: FeaturedPlaylist;
+  songs: Song[];
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const {
+    currentSong,
+    isPlaying,
+    currentTime,
+    duration,
+    playSong,
+    togglePlay,
+    seekTo,
+    nextSong,
+    prevSong,
+  } = usePlayer();
+
+  const [activePopupSong, setActivePopupSong] = useState<Song | null>(null);
+
+  const handleSongClick = (song: Song) => {
+    playSong(song, songs);
+    setActivePopupSong(song);
+  };
+
+  const displaySong = currentSong;
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <motion.div
+      data-ocid="playlist_popup.modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 md:p-6"
+      style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="relative w-full max-w-4xl max-h-[90vh] rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          background: "rgba(14,20,30,0.97)",
+          border: `1px solid ${playlist.accent}55`,
+          boxShadow: `0 0 40px ${playlist.accent}25, 0 20px 60px rgba(0,0,0,0.6)`,
+        }}
+        initial={{ opacity: 0, scale: 0.92, y: 30 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.92, y: 30 }}
+        transition={{ type: "spring", stiffness: 340, damping: 28 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+          style={{
+            background: `linear-gradient(90deg, ${playlist.accent}18, transparent)`,
+            borderBottom: `1px solid ${playlist.accent}30`,
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-3xl leading-none">{playlist.emoji}</span>
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "#E9EEF6" }}>
+                {playlist.name}
+              </h2>
+              <p className="text-xs" style={{ color: "#9AA6B2" }}>
+                {loading ? "Loading songs..." : `${songs.length} songs`}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-ocid="playlist_popup.close_button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#9AA6B2",
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        {loading ? (
+          <div
+            data-ocid="playlist_popup.loading_state"
+            className="flex-1 flex items-center justify-center py-16"
+          >
+            <div className="flex flex-col items-center gap-4">
+              <div
+                className="w-12 h-12 rounded-full border-2 border-t-transparent animate-spin"
+                style={{
+                  borderColor: `${playlist.accent}80`,
+                  borderTopColor: "transparent",
+                }}
+              />
+              <p className="text-sm" style={{ color: "#9AA6B2" }}>
+                Fetching songs...
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+            {/* Desktop: Left mini player */}
+            <div
+              className="hidden md:flex flex-col flex-shrink-0 p-5 gap-4"
+              style={{
+                width: "40%",
+                borderRight: `1px solid ${playlist.accent}20`,
+                background: "rgba(0,0,0,0.2)",
+              }}
+            >
+              {displaySong ? (
+                <>
+                  {/* Album art */}
+                  <div
+                    className="w-full aspect-square rounded-xl overflow-hidden relative"
+                    style={{
+                      boxShadow: `0 8px 32px ${playlist.accent}30`,
+                      maxWidth: "220px",
+                      margin: "0 auto",
+                    }}
+                  >
+                    <img
+                      src={displaySong.thumbnail}
+                      alt={displaySong.title}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          "https://i.ytimg.com/vi/default/mqdefault.jpg";
+                      }}
+                    />
+                    {isPlaying && (
+                      <div
+                        className="absolute inset-0 rounded-xl"
+                        style={{
+                          background: `radial-gradient(circle at center, ${playlist.accent}10, transparent 70%)`,
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  {/* Song info */}
+                  <div className="text-center">
+                    <p
+                      className="font-bold text-sm leading-tight truncate"
+                      style={{ color: "#E9EEF6" }}
+                    >
+                      {displaySong.title}
+                    </p>
+                    <p
+                      className="text-xs mt-1 truncate"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      {displaySong.artist}
+                    </p>
+                  </div>
+
+                  {/* Seek bar */}
+                  <div className="px-1">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={progress}
+                      onChange={(e) =>
+                        seekTo((Number(e.target.value) / 100) * duration)
+                      }
+                      className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                      style={{
+                        background: `linear-gradient(to right, ${playlist.accent} ${progress}%, rgba(255,255,255,0.15) ${progress}%)`,
+                        accentColor: playlist.accent,
+                      }}
+                    />
+                    <div
+                      className="flex justify-between text-xs mt-1"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      <span>{formatTime(currentTime)}</span>
+                      <span>{formatTime(duration)}</span>
+                    </div>
+                  </div>
+
+                  {/* Controls */}
+                  <div className="flex items-center justify-center gap-5">
+                    <button
+                      type="button"
+                      data-ocid="playlist_popup.secondary_button"
+                      onClick={() => prevSong()}
+                      className="transition-all hover:scale-110 active:scale-95"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      <SkipBack size={20} />
+                    </button>
+                    <button
+                      type="button"
+                      data-ocid="playlist_popup.primary_button"
+                      onClick={() => togglePlay()}
+                      className="w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+                      style={{
+                        background: playlist.accent,
+                        boxShadow: `0 0 16px ${playlist.accent}60`,
+                      }}
+                    >
+                      {isPlaying ? (
+                        <Pause size={20} fill="#0E141E" color="#0E141E" />
+                      ) : (
+                        <Play size={20} fill="#0E141E" color="#0E141E" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      data-ocid="playlist_popup.secondary_button"
+                      onClick={() => nextSong()}
+                      className="transition-all hover:scale-110 active:scale-95"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      <SkipForward size={20} />
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                  <span className="text-5xl">{playlist.emoji}</span>
+                  <p
+                    className="text-sm text-center"
+                    style={{ color: "#9AA6B2" }}
+                  >
+                    Pick a song to start playing
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Songs list */}
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div
+                className="flex-1 overflow-y-auto px-3 py-2"
+                style={{
+                  scrollbarWidth: "thin",
+                  scrollbarColor: `${playlist.accent}40 transparent`,
+                }}
+              >
+                {songs.map((song, i) => {
+                  const isActive =
+                    currentSong?.id === song.id ||
+                    activePopupSong?.id === song.id;
+                  return (
+                    <motion.button
+                      key={song.id}
+                      type="button"
+                      data-ocid={`playlist_popup.item.${i + 1}`}
+                      onClick={() => handleSongClick(song)}
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left group transition-all"
+                      style={{
+                        background: isActive
+                          ? `${playlist.accent}18`
+                          : "transparent",
+                        border: isActive
+                          ? `1px solid ${playlist.accent}40`
+                          : "1px solid transparent",
+                      }}
+                    >
+                      {/* Index / play icon */}
+                      <div
+                        className="w-7 h-7 flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                        style={{
+                          color: isActive ? playlist.accent : "#9AA6B2",
+                        }}
+                      >
+                        {isActive && isPlaying ? (
+                          <span className="flex gap-0.5 items-end h-4">
+                            <span
+                              className="w-0.5 rounded-full animate-bounce"
+                              style={{
+                                height: "60%",
+                                background: playlist.accent,
+                                animationDelay: "0ms",
+                              }}
+                            />
+                            <span
+                              className="w-0.5 rounded-full animate-bounce"
+                              style={{
+                                height: "100%",
+                                background: playlist.accent,
+                                animationDelay: "150ms",
+                              }}
+                            />
+                            <span
+                              className="w-0.5 rounded-full animate-bounce"
+                              style={{
+                                height: "70%",
+                                background: playlist.accent,
+                                animationDelay: "300ms",
+                              }}
+                            />
+                          </span>
+                        ) : (
+                          <span className="group-hover:hidden">{i + 1}</span>
+                        )}
+                        {!isActive && (
+                          <Play
+                            size={14}
+                            fill={playlist.accent}
+                            color={playlist.accent}
+                            className="hidden group-hover:block"
+                          />
+                        )}
+                      </div>
+
+                      {/* Thumbnail */}
+                      <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
+                        <img
+                          src={song.thumbnail}
+                          alt={song.title}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              "https://i.ytimg.com/vi/default/mqdefault.jpg";
+                          }}
+                        />
+                      </div>
+
+                      {/* Text */}
+                      <div className="flex-1 min-w-0">
+                        <p
+                          className="text-sm font-semibold truncate leading-tight"
+                          style={{
+                            color: isActive ? playlist.accent : "#E9EEF6",
+                          }}
+                        >
+                          {song.title}
+                        </p>
+                        <p
+                          className="text-xs truncate mt-0.5"
+                          style={{ color: "#9AA6B2" }}
+                        >
+                          {song.artist}
+                        </p>
+                      </div>
+                    </motion.button>
+                  );
+                })}
+              </div>
+
+              {/* Mobile: sticky mini player strip */}
+              {currentSong && (
+                <div
+                  className="md:hidden flex items-center gap-3 px-4 py-3 flex-shrink-0"
+                  style={{
+                    borderTop: `1px solid ${playlist.accent}30`,
+                    background: `linear-gradient(135deg, ${playlist.accent}18, rgba(14,20,30,0.98))`,
+                  }}
+                >
+                  <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
+                    <img
+                      src={currentSong.thumbnail}
+                      alt={currentSong.title}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          "https://i.ytimg.com/vi/default/mqdefault.jpg";
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-xs font-semibold truncate"
+                      style={{ color: "#E9EEF6" }}
+                    >
+                      {currentSong.title}
+                    </p>
+                    <p
+                      className="text-xs truncate"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      {currentSong.artist}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => prevSong()}
+                      className="transition-all hover:scale-110"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      <SkipBack size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      data-ocid="playlist_popup.toggle"
+                      onClick={() => togglePlay()}
+                      className="w-9 h-9 rounded-full flex items-center justify-center"
+                      style={{
+                        background: playlist.accent,
+                        boxShadow: `0 0 10px ${playlist.accent}50`,
+                      }}
+                    >
+                      {isPlaying ? (
+                        <Pause size={16} fill="#0E141E" color="#0E141E" />
+                      ) : (
+                        <Play size={16} fill="#0E141E" color="#0E141E" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => nextSong()}
+                      className="transition-all hover:scale-110"
+                      style={{ color: "#9AA6B2" }}
+                    >
+                      <SkipForward size={18} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function FeaturedPlaylistsSection() {
-  const [activeQuery, setActiveQuery] = useState("");
-  const [activeId, setActiveId] = useState("");
-  const { playSong } = usePlayer();
-  const { data: results, isFetching } = useSearchYouTube(activeQuery);
+  const [popupPlaylist, setPopupPlaylist] = useState<FeaturedPlaylist | null>(
+    null,
+  );
+  const [popupQuery, setPopupQuery] = useState("");
+  const [popupSongs, setPopupSongs] = useState<Song[]>([]);
+  const [popupLoading, setPopupLoading] = useState(false);
+
+  const { data: popupResults, isFetching: isFetchingPopup } =
+    useSearchYouTube(popupQuery);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional - trigger only when results arrive
   React.useEffect(() => {
-    if (results && results.length > 0 && activeQuery) {
-      playSong(results[0], results);
-      const pl = FEATURED_PLAYLISTS.find((p) => p.id === activeId);
-      toast.success(`Playing ${pl?.name ?? "playlist"} 🎵`);
-      setActiveQuery("");
-      setActiveId("");
+    if (popupResults && popupResults.length > 0 && popupQuery) {
+      setPopupSongs(popupResults);
+      setPopupLoading(false);
     }
-  }, [results]);
+  }, [popupResults]);
 
-  const handlePlay = (pl: (typeof FEATURED_PLAYLISTS)[0]) => {
-    if (isFetching) return;
-    setActiveId(pl.id);
-    setActiveQuery(pl.query);
-    toast.loading(`Loading ${pl.name}...`, { id: "featured-pl" });
-    setTimeout(() => toast.dismiss("featured-pl"), 5000);
+  const handleCardClick = (pl: FeaturedPlaylist) => {
+    if (isFetchingPopup) return;
+    setPopupPlaylist(pl);
+    setPopupSongs([]);
+    setPopupLoading(true);
+    setPopupQuery(pl.query);
+  };
+
+  const closePopup = () => {
+    setPopupPlaylist(null);
+    setPopupSongs([]);
+    setPopupLoading(false);
+    setPopupQuery("");
   };
 
   return (
@@ -220,24 +676,25 @@ function FeaturedPlaylistsSection() {
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {FEATURED_PLAYLISTS.map((pl, i) => {
-          const isLoading = isFetching && activeId === pl.id;
+          const isLoading = isFetchingPopup && popupPlaylist?.id === pl.id;
           return (
             <motion.button
               key={pl.id}
               type="button"
               data-ocid={`featured_playlists.item.${i + 1}`}
-              onClick={() => handlePlay(pl)}
-              disabled={isFetching}
+              onClick={() => handleCardClick(pl)}
+              disabled={isFetchingPopup}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.04 }}
-              whileHover={{ scale: isFetching ? 1 : 1.03 }}
-              whileTap={{ scale: isFetching ? 1 : 0.97 }}
+              whileHover={{ scale: isFetchingPopup ? 1 : 1.03 }}
+              whileTap={{ scale: isFetchingPopup ? 1 : 0.97 }}
               className="relative rounded-xl overflow-hidden text-left group"
               style={{
                 height: "120px",
                 background: pl.gradient,
-                opacity: isFetching && activeId !== pl.id ? 0.55 : 1,
+                opacity:
+                  isFetchingPopup && popupPlaylist?.id !== pl.id ? 0.55 : 1,
                 transition: "opacity 0.2s",
               }}
             >
@@ -311,6 +768,18 @@ function FeaturedPlaylistsSection() {
           );
         })}
       </div>
+
+      {/* Playlist Popup */}
+      <AnimatePresence>
+        {popupPlaylist && (
+          <PlaylistPopup
+            playlist={popupPlaylist}
+            songs={popupSongs}
+            loading={popupLoading || isFetchingPopup}
+            onClose={closePopup}
+          />
+        )}
+      </AnimatePresence>
     </section>
   );
 }
