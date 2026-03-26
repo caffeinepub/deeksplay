@@ -6,8 +6,9 @@ import { deductUnits } from "../../hooks/useApiQuota";
 import type { Song } from "../../types/music";
 import {
   getActiveApiKey,
+  getCurrentKeyIndex,
   isQuotaExhaustedError,
-  markCurrentKeyExhausted,
+  markKeyExhausted,
 } from "../../utils/ytApiKey";
 import { SongRow } from "../SongRow";
 
@@ -221,39 +222,36 @@ async function fetchSongsForQuery(query: string): Promise<Song[]> {
     const buildUrl = (key: string) =>
       `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=6&key=${key}&q=${encodeURIComponent(query)}`;
 
-    const res1 = await fetch(buildUrl(getActiveApiKey()));
-    const data1 = await res1.json();
-
-    let data = data1;
-    if (isQuotaExhaustedError(data1)) {
-      const nextKey = markCurrentKeyExhausted();
-      if (!nextKey) return [];
-      const res2 = await fetch(buildUrl(getActiveApiKey()));
-      const data2 = await res2.json();
-      if (isQuotaExhaustedError(data2)) {
-        markCurrentKeyExhausted();
-        return [];
+    // Try all 3 keys with rotation
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const keyIndex = getCurrentKeyIndex();
+      if (keyIndex < 0) return []; // All exhausted
+      const res = await fetch(buildUrl(getActiveApiKey()));
+      const data = await res.json();
+      if (isQuotaExhaustedError(res.status, data)) {
+        const nextKey = markKeyExhausted(keyIndex);
+        if (!nextKey) return [];
+        continue;
       }
-      data = data2;
+      if (!data.items || data.items.length === 0) return [];
+      deductUnits(100);
+      return data.items
+        .filter((item: any) => item.id?.videoId)
+        .map(
+          (item: any): Song => ({
+            id: item.id.videoId,
+            title: item.snippet.title,
+            artist: item.snippet.channelTitle,
+            thumbnail:
+              item.snippet.thumbnails?.medium?.url ||
+              item.snippet.thumbnails?.default?.url ||
+              "",
+            videoId: item.id.videoId,
+            duration: "",
+          }),
+        );
     }
-
-    if (!data.items || data.items.length === 0) return [];
-    deductUnits(100);
-    return data.items
-      .filter((item: any) => item.id?.videoId)
-      .map(
-        (item: any): Song => ({
-          id: item.id.videoId,
-          title: item.snippet.title,
-          artist: item.snippet.channelTitle,
-          thumbnail:
-            item.snippet.thumbnails?.medium?.url ||
-            item.snippet.thumbnails?.default?.url ||
-            "",
-          videoId: item.id.videoId,
-          duration: "",
-        }),
-      );
+    return [];
   } catch {
     return [];
   }

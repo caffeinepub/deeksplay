@@ -53,40 +53,71 @@ export function getCurrentKeyIndex(): number {
   for (let i = 0; i < API_KEYS.length; i++) {
     if (!exhausted.exhausted.includes(i)) return i;
   }
-  return 0; // All exhausted, return first (will show quota error)
+  return -1; // All exhausted
 }
 
 export function getActiveApiKey(): string {
-  return API_KEYS[getCurrentKeyIndex()];
+  const idx = getCurrentKeyIndex();
+  return idx >= 0 ? API_KEYS[idx] : API_KEYS[0];
 }
 
-export function markCurrentKeyExhausted(): string | null {
-  const currentIndex = getCurrentKeyIndex();
+export function markKeyExhausted(keyIndex: number): string | null {
   const data = getExhaustedData();
-  if (!data.exhausted.includes(currentIndex)) {
-    data.exhausted.push(currentIndex);
+  if (!data.exhausted.includes(keyIndex)) {
+    data.exhausted.push(keyIndex);
     saveExhaustedData(data);
   }
-  // Return next available key index
-  const nextIndex = getCurrentKeyIndex();
-  if (nextIndex === currentIndex && data.exhausted.length >= API_KEYS.length) {
-    return null; // All keys exhausted
+  // Find next non-exhausted key
+  for (let i = 0; i < API_KEYS.length; i++) {
+    if (!data.exhausted.includes(i)) return API_KEYS[i];
   }
-  return API_KEYS[nextIndex];
+  return null; // All keys exhausted
 }
 
-export function isQuotaExhaustedError(data: {
-  error?: { message?: string; errors?: Array<{ reason?: string }> };
-}): boolean {
-  if (!data.error) return false;
-  const msg = data.error.message?.toLowerCase() || "";
-  const reason = data.error.errors?.[0]?.reason || "";
-  return (
-    msg.includes("quota") ||
-    msg.includes("exceeded") ||
-    reason === "quotaExceeded" ||
-    reason === "dailyLimitExceeded"
-  );
+// Keep old export name for compatibility
+export function markCurrentKeyExhausted(): string | null {
+  const currentIndex = getCurrentKeyIndex();
+  if (currentIndex < 0) return null;
+  return markKeyExhausted(currentIndex);
+}
+
+export function isQuotaExhaustedError(
+  status: number,
+  // biome-ignore lint/suspicious/noExplicitAny: YouTube API response
+  data: any,
+): boolean {
+  // Direct HTTP 403 with quota reason
+  if (status === 403) {
+    if (!data?.error) return true; // Treat any 403 as quota issue
+    const msg = (data.error.message || "").toLowerCase();
+    const reason = data.error.errors?.[0]?.reason || "";
+    // If 403 and any of these reasons, it's quota
+    if (
+      msg.includes("quota") ||
+      msg.includes("exceeded") ||
+      msg.includes("rate") ||
+      reason === "quotaExceeded" ||
+      reason === "dailyLimitExceeded" ||
+      reason === "rateLimitExceeded" ||
+      reason === "forbidden" ||
+      data.error.code === 403
+    ) {
+      return true;
+    }
+  }
+  // Also check for quota errors in 200 responses (unusual but safe)
+  if (data?.error) {
+    const msg = (data.error.message || "").toLowerCase();
+    const reason = data.error.errors?.[0]?.reason || "";
+    return (
+      msg.includes("quota") ||
+      msg.includes("exceeded") ||
+      reason === "quotaExceeded" ||
+      reason === "dailyLimitExceeded" ||
+      reason === "rateLimitExceeded"
+    );
+  }
+  return false;
 }
 
 export function getKeyStatus(): {
@@ -94,13 +125,19 @@ export function getKeyStatus(): {
   total: number;
   exhaustedCount: number;
   allExhausted: boolean;
+  keys: Array<{ label: string; active: boolean; exhausted: boolean }>;
 } {
   const data = getExhaustedData();
   const currentIndex = getCurrentKeyIndex();
   return {
-    index: currentIndex + 1,
+    index: currentIndex >= 0 ? currentIndex + 1 : API_KEYS.length,
     total: API_KEYS.length,
     exhaustedCount: data.exhausted.length,
     allExhausted: data.exhausted.length >= API_KEYS.length,
+    keys: API_KEYS.map((_, i) => ({
+      label: `Key ${i + 1}`,
+      active: i === currentIndex,
+      exhausted: data.exhausted.includes(i),
+    })),
   };
 }

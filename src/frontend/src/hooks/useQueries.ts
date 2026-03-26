@@ -2,8 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Song } from "../types/music";
 import {
   getActiveApiKey,
+  getCurrentKeyIndex,
   isQuotaExhaustedError,
-  markCurrentKeyExhausted,
+  markKeyExhausted,
 } from "../utils/ytApiKey";
 import { deductUnits } from "./useApiQuota";
 
@@ -30,32 +31,58 @@ function lsSet<T>(key: string, value: T): void {
 }
 
 // ─── Quota-aware fetch helper ─────────────────────────────────────────────────
+// Loops through ALL available keys before giving up
 async function ytFetch(buildUrl: (key: string) => string): Promise<any> {
-  const url1 = buildUrl(getActiveApiKey());
-  const res1 = await fetch(url1);
-  const data1 = await res1.json();
-  if (isQuotaExhaustedError(data1)) {
-    const nextKey = markCurrentKeyExhausted();
-    if (!nextKey) {
+  const MAX_KEYS = 3; // Total number of API keys
+  let triedKeys: number[] = [];
+
+  for (let attempt = 0; attempt < MAX_KEYS; attempt++) {
+    const keyIndex = getCurrentKeyIndex();
+
+    // If all keys are exhausted (keyIndex === -1) or we've tried this key already
+    if (keyIndex < 0) {
       throw new Error(
         "Saari YouTube API keys ka quota khatam ho gaya. Kal ~12:30 AM IST pe reset hoga.",
       );
     }
-    const url2 = buildUrl(getActiveApiKey());
-    const res2 = await fetch(url2);
-    const data2 = await res2.json();
-    if (isQuotaExhaustedError(data2)) {
-      markCurrentKeyExhausted();
-      throw new Error(
-        "Saari YouTube API keys ka quota khatam ho gaya. Kal ~12:30 AM IST pe reset hoga.",
-      );
+
+    // Avoid infinite loop if somehow we keep getting same exhausted key
+    if (triedKeys.includes(keyIndex)) break;
+    triedKeys.push(keyIndex);
+
+    const currentKey = getActiveApiKey();
+    const url = buildUrl(currentKey);
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (isQuotaExhaustedError(res.status, data)) {
+        // Mark THIS specific key (by index) as exhausted
+        const nextKey = markKeyExhausted(keyIndex);
+        if (!nextKey) {
+          throw new Error(
+            "Saari YouTube API keys ka quota khatam ho gaya. Kal ~12:30 AM IST pe reset hoga.",
+          );
+        }
+        // Continue loop -- next iteration will use the new active key
+        continue;
+      }
+
+      if (data.error)
+        throw new Error(data.error.message || "YouTube API error");
+      return data;
+    } catch (err) {
+      // Network errors -- don't try next key, just throw
+      if (err instanceof TypeError && err.message.includes("fetch")) throw err;
+      // Re-throw quota errors
+      if (err instanceof Error && err.message.includes("quota")) throw err;
+      throw err;
     }
-    if (data2.error)
-      throw new Error(data2.error.message || "YouTube API error");
-    return data2;
   }
-  if (data1.error) throw new Error(data1.error.message || "YouTube API error");
-  return data1;
+  throw new Error(
+    "Saari YouTube API keys ka quota khatam ho gaya. Kal ~12:30 AM IST pe reset hoga.",
+  );
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: YouTube API
@@ -104,7 +131,7 @@ export function useSearchYouTube(query: string) {
     },
     enabled: !!query.trim(),
     staleTime: 5 * 60 * 1000,
-    retry: 1,
+    retry: false, // Don't retry -- key rotation handles it inside ytFetch
   });
 }
 
@@ -120,6 +147,7 @@ export function useTrendingMusic() {
       return data.items.map(mapVideoItem);
     },
     staleTime: 10 * 60 * 1000,
+    retry: false,
   });
 }
 
@@ -307,6 +335,6 @@ export function useTrendingByRegion(regionCode: string, query?: string) {
       return data.items.map(mapVideoItem);
     },
     staleTime: 10 * 60 * 1000,
-    retry: 1,
+    retry: false,
   });
 }
