@@ -219,20 +219,30 @@ function getAIResponse(input: string): { text: string; searchQuery?: string } {
 
 async function fetchSongsForQuery(query: string): Promise<Song[]> {
   try {
-    const buildUrl = (key: string) =>
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=6&key=${key}&q=${encodeURIComponent(query)}`;
-
-    // Try all 3 keys with rotation
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const totalKeys = 3;
+    for (let attempt = 0; attempt < totalKeys; attempt++) {
       const keyIndex = getCurrentKeyIndex();
-      if (keyIndex < 0) return []; // All exhausted
-      const res = await fetch(buildUrl(getActiveApiKey()));
-      const data = await res.json();
+      if (keyIndex < 0) return [];
+
+      const currentKey = getActiveApiKey();
+      let res: Response;
+      let data: any;
+
+      try {
+        res = await fetch(
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=6&key=${currentKey}&q=${encodeURIComponent(query)}`,
+        );
+        data = await res.json();
+      } catch {
+        return [];
+      }
+
       if (isQuotaExhaustedError(res.status, data)) {
         const nextKey = markKeyExhausted(keyIndex);
         if (!nextKey) return [];
         continue;
       }
+
       if (!data.items || data.items.length === 0) return [];
       deductUnits(100);
       return data.items

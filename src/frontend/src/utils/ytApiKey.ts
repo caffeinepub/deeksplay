@@ -49,7 +49,6 @@ function saveExhaustedData(data: ExhaustedData): void {
 
 export function getCurrentKeyIndex(): number {
   const exhausted = getExhaustedData();
-  // Find first non-exhausted key
   for (let i = 0; i < API_KEYS.length; i++) {
     if (!exhausted.exhausted.includes(i)) return i;
   }
@@ -67,54 +66,34 @@ export function markKeyExhausted(keyIndex: number): string | null {
     data.exhausted.push(keyIndex);
     saveExhaustedData(data);
   }
-  // Find next non-exhausted key
   for (let i = 0; i < API_KEYS.length; i++) {
     if (!data.exhausted.includes(i)) return API_KEYS[i];
   }
-  return null; // All keys exhausted
+  return null;
 }
 
-// Keep old export name for compatibility
 export function markCurrentKeyExhausted(): string | null {
   const currentIndex = getCurrentKeyIndex();
   if (currentIndex < 0) return null;
   return markKeyExhausted(currentIndex);
 }
 
-export function isQuotaExhaustedError(
-  status: number,
-  // biome-ignore lint/suspicious/noExplicitAny: YouTube API response
-  data: any,
-): boolean {
-  // Direct HTTP 403 with quota reason
-  if (status === 403) {
-    if (!data?.error) return true; // Treat any 403 as quota issue
-    const msg = (data.error.message || "").toLowerCase();
-    const reason = data.error.errors?.[0]?.reason || "";
-    // If 403 and any of these reasons, it's quota
-    if (
-      msg.includes("quota") ||
-      msg.includes("exceeded") ||
-      msg.includes("rate") ||
-      reason === "quotaExceeded" ||
-      reason === "dailyLimitExceeded" ||
-      reason === "rateLimitExceeded" ||
-      reason === "forbidden" ||
-      data.error.code === 403
-    ) {
-      return true;
-    }
-  }
-  // Also check for quota errors in 200 responses (unusual but safe)
+// Simplified: ANY 403 response = quota/permission issue = rotate key
+// biome-ignore lint/suspicious/noExplicitAny: YouTube API response
+export function isQuotaExhaustedError(status: number, data: any): boolean {
+  // Any HTTP 403 triggers key rotation -- quota exhausted or forbidden
+  if (status === 403) return true;
+  // Check body for quota errors in 200 responses (edge case)
   if (data?.error) {
     const msg = (data.error.message || "").toLowerCase();
-    const reason = data.error.errors?.[0]?.reason || "";
+    const reason = (data.error.errors?.[0]?.reason || "").toLowerCase();
     return (
       msg.includes("quota") ||
       msg.includes("exceeded") ||
-      reason === "quotaExceeded" ||
-      reason === "dailyLimitExceeded" ||
-      reason === "rateLimitExceeded"
+      msg.includes("rate limit") ||
+      reason.includes("quota") ||
+      reason.includes("exceeded") ||
+      reason.includes("rate")
     );
   }
   return false;
