@@ -38,9 +38,11 @@ export interface PlayerContextType {
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
 
+// A real short silent MP3 loop — keeps browser treating tab as media player
 const SILENT_AUDIO_SRC =
   "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD///////////////////////////////////////////8AAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASDs90hvAAAAAAAAAAAAAAAAAAAA//sQZAAP8AAAaQAAAAgAAA0gAAABAAABpAAAACAAADSAAAAETEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
 
+/** Start a near-silent Web Audio oscillator so the AudioContext stays active in background */
 function startWebAudioKeepalive(): () => void {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -48,7 +50,7 @@ function startWebAudioKeepalive(): () => void {
     const ctx = new AudioCtx();
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
-    gainNode.gain.value = 0.00001;
+    gainNode.gain.value = 0.00001; // virtually silent
     oscillator.connect(gainNode);
     gainNode.connect(ctx.destination);
     oscillator.start();
@@ -81,6 +83,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const isPlayingRef = useRef(false);
   const webAudioCleanupRef = useRef<(() => void) | null>(null);
   const wakeLockRef = useRef<any>(null);
+  const durationRef = useRef(0);
+  const currentTimeRef = useRef(0);
 
   const currentSongRef = useRef<Song | null>(null);
   const queueRef = useRef<Song[]>([]);
@@ -102,11 +106,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+  useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
 
+  // ─── Silent HTML5 Audio loop ───────────────────────────────────────────────
+  // This is the KEY trick: a looping HTML5 <audio> element signals to Android
+  // that this page is a media player, preventing it from killing the tab.
   useEffect(() => {
     const audio = new Audio(SILENT_AUDIO_SRC);
     audio.loop = true;
     audio.volume = 0.001;
+    // Do NOT pause this ever — let it loop silently in background
     silentAudioRef.current = audio;
     return () => {
       audio.pause();
@@ -114,6 +128,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // ─── Screen Wake Lock ─────────────────────────────────────────────────────
   const requestWakeLock = useCallback(async () => {
     if ("wakeLock" in navigator && !wakeLockRef.current) {
       try {
@@ -136,26 +151,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ─── Visibility change: RE-ACQUIRE wake lock & resume — NEVER pause ───────
   useEffect(() => {
     const handleVisibility = async () => {
       if (document.visibilityState === "visible") {
-        if (isPlayingRef.current && playerRef.current) {
+        // Re-acquire wake lock (it gets released when tab is hidden)
+        if (isPlayingRef.current) {
+          await requestWakeLock();
+          // Resume silent audio and Web Audio keepalive
+          silentAudioRef.current?.play().catch(() => {});
+          if (!webAudioCleanupRef.current) {
+            webAudioCleanupRef.current = startWebAudioKeepalive();
+          }
+          // Resume YouTube player if it got paused by the system
           try {
-            playerRef.current.playVideo();
+            playerRef.current?.playVideo();
           } catch (_e) {}
         }
-        if (isPlayingRef.current) await requestWakeLock();
+      }
+      // NOTE: We intentionally do NOTHING when visibility becomes 'hidden'.
+      // This prevents the app from pausing audio when minimized or screen off.
+    };
+
+    // Also handle blur — do NOT pause on blur
+    const handleFocus = () => {
+      if (isPlayingRef.current) {
         silentAudioRef.current?.play().catch(() => {});
-        if (isPlayingRef.current && !webAudioCleanupRef.current) {
-          webAudioCleanupRef.current = startWebAudioKeepalive();
-        }
       }
     };
+
     document.addEventListener("visibilitychange", handleVisibility);
-    return () =>
+    window.addEventListener("focus", handleFocus);
+    // Intentionally NOT adding any 'blur' or 'pagehide' pause handlers
+    return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [requestWakeLock]);
 
+  // ─── YouTube IFrame API load ───────────────────────────────────────────────
   useEffect(() => {
     if (window.YT?.Player) {
       setYtReady(true);
@@ -171,30 +205,71 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const nextSongRef = useRef<() => void>(() => {});
   const prevSongRef = useRef<() => void>(() => {});
 
+  // ─── Media Session API ────────────────────────────────────────────────────
+  // This makes Android show media controls in the notification shade and
+  // tells the OS this is a media player — critical for background playback.
   useEffect(() => {
     if (!currentSong || !("mediaSession" in navigator)) return;
+
     navigator.mediaSession.metadata = new MediaMetadata({
       title: currentSong.title,
       artist: currentSong.artist || "Deeksplay",
+      album: "Deeksplay",
       artwork: [
         { src: currentSong.thumbnail, sizes: "96x96", type: "image/jpeg" },
         { src: currentSong.thumbnail, sizes: "128x128", type: "image/jpeg" },
+        { src: currentSong.thumbnail, sizes: "192x192", type: "image/jpeg" },
+        { src: currentSong.thumbnail, sizes: "256x256", type: "image/jpeg" },
+        { src: currentSong.thumbnail, sizes: "512x512", type: "image/jpeg" },
       ],
     });
-    navigator.mediaSession.setActionHandler("play", () =>
-      playerRef.current?.playVideo(),
-    );
-    navigator.mediaSession.setActionHandler("pause", () =>
-      playerRef.current?.pauseVideo(),
-    );
+
+    navigator.mediaSession.setActionHandler("play", () => {
+      playerRef.current?.playVideo();
+      silentAudioRef.current?.play().catch(() => {});
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      playerRef.current?.pauseVideo();
+    });
     navigator.mediaSession.setActionHandler("nexttrack", () =>
       nextSongRef.current(),
     );
     navigator.mediaSession.setActionHandler("previoustrack", () =>
       prevSongRef.current(),
     );
+    navigator.mediaSession.setActionHandler("seekto", (details) => {
+      if (details.seekTime != null) {
+        playerRef.current?.seekTo(details.seekTime, true);
+        setCurrentTime(details.seekTime);
+      }
+    });
+    navigator.mediaSession.setActionHandler("seekforward", (details) => {
+      const skip = details.seekOffset ?? 10;
+      const t = Math.min(currentTimeRef.current + skip, durationRef.current);
+      playerRef.current?.seekTo(t, true);
+      setCurrentTime(t);
+    });
+    navigator.mediaSession.setActionHandler("seekbackward", (details) => {
+      const skip = details.seekOffset ?? 10;
+      const t = Math.max(currentTimeRef.current - skip, 0);
+      playerRef.current?.seekTo(t, true);
+      setCurrentTime(t);
+    });
   }, [currentSong]);
 
+  // Update Media Session position state regularly so seek bar in notification works
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !isPlaying || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.min(currentTime, duration),
+      });
+    } catch (_e) {}
+  }, [currentTime, duration, isPlaying]);
+
+  // ─── Song end handler ─────────────────────────────────────────────────────
   const handleSongEnd = useCallback(() => {
     const q = queueRef.current;
     const song = currentSongRef.current;
@@ -221,6 +296,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     handleSongEndRef.current = handleSongEnd;
   }, [handleSongEnd]);
 
+  // ─── YouTube Player init ──────────────────────────────────────────────────
   const initPlayer = useCallback(
     (videoId: string) => {
       if (!ytReady) return;
@@ -237,12 +313,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           controls: 0,
           enablejsapi: 1,
           origin: window.location.origin,
+          // Allow background playback
+          playsinline: 1,
         },
         events: {
           onReady: (e: any) => {
             e.target.setVolume(volume);
             e.target.playVideo();
             setIsPlaying(true);
+            // Start silent audio loop immediately — this is what keeps Android alive
             silentAudioRef.current?.play().catch(() => {});
             if (webAudioCleanupRef.current) webAudioCleanupRef.current();
             webAudioCleanupRef.current = startWebAudioKeepalive();
@@ -251,14 +330,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           onStateChange: (e: any) => {
             if (e.data === window.YT.PlayerState.PLAYING) {
               setIsPlaying(true);
-              setDuration(e.target.getDuration());
+              const dur = e.target.getDuration();
+              setDuration(dur);
               clearInterval(intervalRef.current);
-              intervalRef.current = setInterval(
-                () => setCurrentTime(e.target.getCurrentTime()),
-                500,
-              );
+              intervalRef.current = setInterval(() => {
+                const t = e.target.getCurrentTime();
+                setCurrentTime(t);
+              }, 500);
               if ("mediaSession" in navigator)
                 navigator.mediaSession.playbackState = "playing";
+              // Keep silent audio and Web Audio alive
               silentAudioRef.current?.play().catch(() => {});
               if (!webAudioCleanupRef.current)
                 webAudioCleanupRef.current = startWebAudioKeepalive();
@@ -319,8 +400,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const togglePlay = useCallback(() => {
     if (!playerRef.current) return;
-    if (isPlaying) playerRef.current.pauseVideo();
-    else playerRef.current.playVideo();
+    if (isPlaying) {
+      playerRef.current.pauseVideo();
+    } else {
+      playerRef.current.playVideo();
+      silentAudioRef.current?.play().catch(() => {});
+    }
   }, [isPlaying]);
 
   const seekTo = useCallback((time: number) => {
@@ -401,6 +486,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      {/* Hidden YouTube player iframe */}
       <div
         id="yt-player"
         style={{
@@ -410,6 +496,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           width: "1px",
           height: "1px",
           opacity: 0,
+          pointerEvents: "none",
         }}
       />
     </PlayerContext.Provider>

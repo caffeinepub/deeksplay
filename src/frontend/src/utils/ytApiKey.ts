@@ -3,9 +3,9 @@
 // Automatically switches to next key when current one is exhausted
 
 const API_KEYS = [
-  "AIzaSyDySA-v4ObH1L6k7ZSRlxEd61H594H0cSI", // Project 1
-  "AIzaSyDMNE2qLnyKs_lu_om4gGpwLOIXPNpDbsk", // Project 2
-  "AIzaSyDKN0uNpJcwW8fgwOB8y9jErZ8qjEZXp0U", // Project 3
+  "AIzaSyD7hpK6wim2btzsNni9uwXgupfhh-RjSRk", // Project 1 (New)
+  "AIzaSyD1iZ0hlaYbJUFA0lt4uDED3vkBdBIiLC8", // Project 2 (New)
+  "AIzaSyDgwHsJpJo-TJeQhXg4zKctOByr656S6xU", // Project 3 (New)
 ];
 
 const KEY_EXHAUSTED_KEY = "deeksplay_key_exhausted";
@@ -24,6 +24,7 @@ function getTodayUTC(): string {
 interface ExhaustedData {
   exhausted: number[]; // indices of exhausted keys
   date: string;
+  reasons?: Record<number, string>; // reason per key index
 }
 
 function getExhaustedData(): ExhaustedData {
@@ -60,10 +61,17 @@ export function getActiveApiKey(): string {
   return idx >= 0 ? API_KEYS[idx] : API_KEYS[0];
 }
 
-export function markKeyExhausted(keyIndex: number): string | null {
+export function markKeyExhausted(
+  keyIndex: number,
+  reason?: string,
+): string | null {
   const data = getExhaustedData();
   if (!data.exhausted.includes(keyIndex)) {
     data.exhausted.push(keyIndex);
+    if (reason) {
+      data.reasons = data.reasons || {};
+      data.reasons[keyIndex] = reason;
+    }
     saveExhaustedData(data);
   }
   for (let i = 0; i < API_KEYS.length; i++) {
@@ -78,24 +86,54 @@ export function markCurrentKeyExhausted(): string | null {
   return markKeyExhausted(currentIndex);
 }
 
-// Simplified: ANY 403 response = quota/permission issue = rotate key
+// Manual reset -- clears all exhausted state
+export function resetAllKeys(): void {
+  try {
+    localStorage.removeItem(KEY_EXHAUSTED_KEY);
+  } catch {}
+}
+
+// IMPORTANT: Only rotate on GENUINE quota exhaustion errors.
+// Do NOT rotate on keyInvalid / accessNotConfigured -- those are setup issues.
 // biome-ignore lint/suspicious/noExplicitAny: YouTube API response
 export function isQuotaExhaustedError(status: number, data: any): boolean {
-  // Any HTTP 403 triggers key rotation -- quota exhausted or forbidden
-  if (status === 403) return true;
-  // Check body for quota errors in 200 responses (edge case)
   if (data?.error) {
-    const msg = (data.error.message || "").toLowerCase();
     const reason = (data.error.errors?.[0]?.reason || "").toLowerCase();
-    return (
-      msg.includes("quota") ||
-      msg.includes("exceeded") ||
-      msg.includes("rate limit") ||
-      reason.includes("quota") ||
-      reason.includes("exceeded") ||
-      reason.includes("rate")
-    );
+    const msg = (data.error.message || "").toLowerCase();
+
+    // Key configuration problems -- DON'T rotate, these are setup issues
+    const setupErrors = [
+      "keyinvalid",
+      "accessnotconfigured",
+      "apikeynotvalid",
+      "forbidden",
+      "insufficient",
+      "badrequest",
+    ];
+    if (setupErrors.some((e) => reason.includes(e) || msg.includes(e))) {
+      return false;
+    }
+
+    // Genuine quota / rate limit errors -- rotate!
+    const quotaErrors = [
+      "quotaexceeded",
+      "ratelimitexceeded",
+      "dailylimitexceeded",
+      "usagelimits",
+      "quota",
+      "rate limit",
+    ];
+    if (quotaErrors.some((e) => reason.includes(e) || msg.includes(e))) {
+      return true;
+    }
+
+    // 403 with unknown error body -- rotate as a precaution
+    if (status === 403) return true;
   }
+
+  // 403 without parseable body -- rotate
+  if (status === 403) return true;
+
   return false;
 }
 
@@ -104,7 +142,12 @@ export function getKeyStatus(): {
   total: number;
   exhaustedCount: number;
   allExhausted: boolean;
-  keys: Array<{ label: string; active: boolean; exhausted: boolean }>;
+  keys: Array<{
+    label: string;
+    active: boolean;
+    exhausted: boolean;
+    reason?: string;
+  }>;
 } {
   const data = getExhaustedData();
   const currentIndex = getCurrentKeyIndex();
@@ -117,6 +160,7 @@ export function getKeyStatus(): {
       label: `Key ${i + 1}`,
       active: i === currentIndex,
       exhausted: data.exhausted.includes(i),
+      reason: data.reasons?.[i],
     })),
   };
 }

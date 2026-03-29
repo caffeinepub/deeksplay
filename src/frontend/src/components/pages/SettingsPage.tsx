@@ -1,6 +1,8 @@
 import { motion } from "motion/react";
+import { useState } from "react";
 import { THEMES, useTheme } from "../../context/ThemeContext";
 import { useApiQuota } from "../../hooks/useApiQuota";
+import { resetAllKeys } from "../../utils/ytApiKey";
 
 const KEY_LABELS = ["key-1", "key-2", "key-3"] as const;
 
@@ -245,6 +247,17 @@ export function SettingsPage() {
     resetTimeIST,
   } = useApiQuota();
 
+  const [resetDone, setResetDone] = useState(false);
+
+  function handleForceReset() {
+    resetAllKeys();
+    setResetDone(true);
+    setTimeout(() => {
+      setResetDone(false);
+      window.location.reload();
+    }, 1200);
+  }
+
   const quotaColor =
     remainingUnits > 5000
       ? "#23E6E2"
@@ -355,6 +368,29 @@ export function SettingsPage() {
               </span>
             </div>
           </div>
+
+          {/* Force Reset Button */}
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={handleForceReset}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:scale-105 active:scale-95"
+              style={{
+                background: resetDone
+                  ? "rgba(35,230,226,0.15)"
+                  : "rgba(255,79,216,0.1)",
+                border: `1px solid ${resetDone ? "rgba(35,230,226,0.5)" : "rgba(255,79,216,0.4)"}`,
+                color: resetDone ? "#23E6E2" : "#FF4FD8",
+              }}
+            >
+              {resetDone
+                ? "✅ Reset ho gaya! Reload ho raha hai..."
+                : "🔄 Force Reset Key Status"}
+            </button>
+          </div>
+          <p className="text-xs text-center mt-2" style={{ color: "#9AA6B2" }}>
+            Agar keys galti se exhausted mark ho gayi hain toh yeh press karo
+          </p>
         </motion.div>
 
         {/* Unit Cost Breakdown */}
@@ -449,7 +485,7 @@ export function SettingsPage() {
               style={{ borderBottom: "1px solid rgba(42,52,65,0.4)" }}
             >
               <span style={{ color: "#9AA6B2" }}>Version</span>
-              <span style={{ color: "#E9EEF6" }}>v23.0.0</span>
+              <span style={{ color: "#E9EEF6" }}>v34.0.0</span>
             </div>
             <div
               className="flex justify-between items-center py-2"
@@ -526,6 +562,11 @@ export function SettingsPage() {
               <span style={{ color: "#23E6E2", marginTop: 2 }}>•</span>
               Quota resets every day at 12:30 AM IST automatically.
             </li>
+            <li className="flex items-start gap-2">
+              <span style={{ color: "#FF4FD8", marginTop: 2 }}>•</span>
+              Agar app kaam karna band kar de toh Settings mein "Force Reset Key
+              Status" dabao.
+            </li>
           </ul>
         </motion.div>
 
@@ -534,7 +575,7 @@ export function SettingsPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25 }}
-          className="rounded-2xl p-5 mb-4"
+          className="rounded-2xl p-5 mb-4 mt-4"
           style={{
             background: "rgba(35,230,226,0.06)",
             border: "1px solid rgba(35,230,226,0.2)",
