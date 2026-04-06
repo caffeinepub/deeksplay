@@ -13,6 +13,20 @@ declare global {
   interface Window {
     YT: any;
     onYouTubeIframeAPIReady: () => void;
+    median?: {
+      nativeMediaPlayer?: {
+        play: (track: {
+          url: string;
+          title: string;
+          artist: string;
+          album?: string;
+          imageUrl: string;
+        }) => void;
+        pause: () => void;
+        resume: () => void;
+        stop: () => void;
+      };
+    };
   }
 }
 
@@ -342,6 +356,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       currentSongRef.current = song;
       setCurrentTime(0);
       clearInterval(intervalRef.current);
+
+      // ─── Median Native Media Player (for Median.co APK wrapper) ──────────
+      // This tells Android's notification shade about the current track.
+      // Only fires when app is running inside a Median.co native shell.
+      if (window.median?.nativeMediaPlayer) {
+        const songUrl = `https://www.youtube.com/watch?v=${song.videoId}`;
+        window.median.nativeMediaPlayer.play({
+          url: songUrl,
+          title: song.title,
+          artist: song.artist || "Deeksplay",
+          album: "Deeksplay",
+          imageUrl: song.thumbnail,
+        });
+      }
+
       if (ytReady) initPlayer(song.videoId);
       else pendingSongRef.current = song;
     },
@@ -373,9 +402,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!playerRef.current) return;
     if (isPlaying) {
       playerRef.current.pauseVideo();
+      // Notify Median native player to pause
+      if (window.median?.nativeMediaPlayer) {
+        window.median.nativeMediaPlayer.pause();
+      }
     } else {
       playerRef.current.playVideo();
       startSilentAudio();
+      // Notify Median native player to resume
+      if (window.median?.nativeMediaPlayer) {
+        window.median.nativeMediaPlayer.resume();
+      }
     }
   }, [isPlaying, startSilentAudio]);
 
