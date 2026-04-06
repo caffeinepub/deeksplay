@@ -95,7 +95,6 @@ export function resetAllKeys(): void {
 
 // IMPORTANT: Only rotate on GENUINE quota exhaustion errors.
 // Do NOT rotate on keyInvalid / accessNotConfigured -- those are setup issues.
-// biome-ignore lint/suspicious/noExplicitAny: YouTube API response
 export function isQuotaExhaustedError(status: number, data: any): boolean {
   if (data?.error) {
     const reason = (data.error.errors?.[0]?.reason || "").toLowerCase();

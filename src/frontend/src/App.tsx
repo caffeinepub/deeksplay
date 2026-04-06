@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { AddToPlaylistModal } from "./components/AddToPlaylistModal";
 import { BottomNav } from "./components/BottomNav";
 import { DeekBot } from "./components/DeekBot";
+import { FloatingMiniPlayer } from "./components/FloatingMiniPlayer";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { ParticleBackground } from "./components/ParticleBackground";
 import { Sidebar } from "./components/Sidebar";
@@ -57,12 +58,19 @@ function AppContent() {
   const addRecentRef = useRef(addRecentlyPlayed);
   addRecentRef.current = addRecentlyPlayed;
   const currentSongIdRef = useRef(currentSong?.id);
+  // Track whether we've seen the first song (to show toast on song changes, including first)
+  const hasHadSongRef = useRef(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally tracks song id changes
   useEffect(() => {
     if (currentSong && currentSong.id !== currentSongIdRef.current) {
       currentSongIdRef.current = currentSong.id;
       addRecentRef.current.mutate(currentSong);
+      // Now Playing toast — show for every song change after app load
+      if (hasHadSongRef.current) {
+        toast(`🎵 Now Playing: ${currentSong.title}`, { duration: 3000 });
+      }
+      hasHadSongRef.current = true;
     }
   }, [currentSong?.id]);
 
@@ -212,6 +220,9 @@ function AppContent() {
 
       {/* Bottom nav: mobile only, fixed */}
       <BottomNav activePage={activePage} onNavigate={setActivePage} />
+
+      {/* Floating mini player widget */}
+      <FloatingMiniPlayer />
 
       <AddToPlaylistModal
         song={addToPlaylistSong}

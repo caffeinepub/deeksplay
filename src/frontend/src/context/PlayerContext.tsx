@@ -38,33 +38,6 @@ export interface PlayerContextType {
 
 const PlayerContext = createContext<PlayerContextType | null>(null);
 
-// A real short silent MP3 loop — keeps browser treating tab as media player
-const SILENT_AUDIO_SRC =
-  "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAABIADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMD///////////////////////////////////////////8AAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAASDs90hvAAAAAAAAAAAAAAAAAAAA//sQZAAP8AAAaQAAAAgAAA0gAAABAAABpAAAACAAADSAAAAETEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
-
-/** Start a near-silent Web Audio oscillator so the AudioContext stays active in background */
-function startWebAudioKeepalive(): () => void {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return () => {};
-    const ctx = new AudioCtx();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    gainNode.gain.value = 0.00001; // virtually silent
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    oscillator.start();
-    return () => {
-      try {
-        oscillator.stop();
-        ctx.close();
-      } catch (_e) {}
-    };
-  } catch (_e) {
-    return () => {};
-  }
-}
-
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -78,10 +51,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<any>(null);
+  const keepaliveIntervalRef = useRef<any>(null);
   const pendingSongRef = useRef<Song | null>(null);
+  // The silent audio DOM element ref — attached directly to JSX below
   const silentAudioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef(false);
-  const webAudioCleanupRef = useRef<(() => void) | null>(null);
   const wakeLockRef = useRef<any>(null);
   const durationRef = useRef(0);
   const currentTimeRef = useRef(0);
@@ -113,19 +87,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     currentTimeRef.current = currentTime;
   }, [currentTime]);
 
-  // ─── Silent HTML5 Audio loop ───────────────────────────────────────────────
-  // This is the KEY trick: a looping HTML5 <audio> element signals to Android
-  // that this page is a media player, preventing it from killing the tab.
-  useEffect(() => {
-    const audio = new Audio(SILENT_AUDIO_SRC);
-    audio.loop = true;
-    audio.volume = 0.001;
-    // Do NOT pause this ever — let it loop silently in background
-    silentAudioRef.current = audio;
-    return () => {
-      audio.pause();
-      silentAudioRef.current = null;
-    };
+  // ─── Start silent audio (call after user gesture) ─────────────────────────
+  // Uses /silence.wav — a proper 3-second looping WAV file.
+  // This is what makes Android recognize the app as a media player.
+  const startSilentAudio = useCallback(() => {
+    const audio = silentAudioRef.current;
+    if (!audio) return;
+    audio.volume = 0.01; // low but non-zero — Android ignores volume=0 sources
+    audio.play().catch(() => {});
   }, []);
 
   // ─── Screen Wake Lock ─────────────────────────────────────────────────────
@@ -151,43 +120,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ─── Visibility change: RE-ACQUIRE wake lock & resume — NEVER pause ───────
+  // ─── Periodic keepalive — every 5s ensure silent audio is still playing ───
+  // Android can kill audio contexts silently; this revives them.
+  const startKeepalive = useCallback(() => {
+    clearInterval(keepaliveIntervalRef.current);
+    keepaliveIntervalRef.current = setInterval(() => {
+      const audio = silentAudioRef.current;
+      if (audio?.paused && isPlayingRef.current) {
+        audio.play().catch(() => {});
+      }
+    }, 5000);
+  }, []);
+
+  const stopKeepalive = useCallback(() => {
+    clearInterval(keepaliveIntervalRef.current);
+  }, []);
+
+  // ─── Visibility change: re-acquire wake lock & resume silent audio ─────────
+  // NEVER pause on visibility hidden — only resume when visible.
   useEffect(() => {
     const handleVisibility = async () => {
-      if (document.visibilityState === "visible") {
-        // Re-acquire wake lock (it gets released when tab is hidden)
-        if (isPlayingRef.current) {
-          await requestWakeLock();
-          // Resume silent audio and Web Audio keepalive
-          silentAudioRef.current?.play().catch(() => {});
-          if (!webAudioCleanupRef.current) {
-            webAudioCleanupRef.current = startWebAudioKeepalive();
-          }
-          // Resume YouTube player if it got paused by the system
-          try {
-            playerRef.current?.playVideo();
-          } catch (_e) {}
-        }
+      if (document.visibilityState === "visible" && isPlayingRef.current) {
+        await requestWakeLock();
+        startSilentAudio();
+        try {
+          playerRef.current?.playVideo();
+        } catch (_e) {}
+        if ("mediaSession" in navigator)
+          navigator.mediaSession.playbackState = "playing";
       }
-      // NOTE: We intentionally do NOTHING when visibility becomes 'hidden'.
-      // This prevents the app from pausing audio when minimized or screen off.
+      // Intentionally do nothing when hidden — don't pause anything
     };
-
-    // Also handle blur — do NOT pause on blur
-    const handleFocus = () => {
-      if (isPlayingRef.current) {
-        silentAudioRef.current?.play().catch(() => {});
-      }
-    };
-
     document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("focus", handleFocus);
-    // Intentionally NOT adding any 'blur' or 'pagehide' pause handlers
-    return () => {
+    return () =>
       document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [requestWakeLock]);
+  }, [requestWakeLock, startSilentAudio]);
 
   // ─── YouTube IFrame API load ───────────────────────────────────────────────
   useEffect(() => {
@@ -206,8 +173,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const prevSongRef = useRef<() => void>(() => {});
 
   // ─── Media Session API ────────────────────────────────────────────────────
-  // This makes Android show media controls in the notification shade and
-  // tells the OS this is a media player — critical for background playback.
+  // Sets notification shade controls on Android.
+  // Must be called AFTER silent audio has started playing.
   useEffect(() => {
     if (!currentSong || !("mediaSession" in navigator)) return;
 
@@ -226,7 +193,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     navigator.mediaSession.setActionHandler("play", () => {
       playerRef.current?.playVideo();
-      silentAudioRef.current?.play().catch(() => {});
+      startSilentAudio();
     });
     navigator.mediaSession.setActionHandler("pause", () => {
       playerRef.current?.pauseVideo();
@@ -255,9 +222,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       playerRef.current?.seekTo(t, true);
       setCurrentTime(t);
     });
-  }, [currentSong]);
+  }, [currentSong, startSilentAudio]);
 
-  // Update Media Session position state regularly so seek bar in notification works
+  // Update Media Session position state so seek bar in notification works
   useEffect(() => {
     if (!("mediaSession" in navigator) || !isPlaying || duration <= 0) return;
     try {
@@ -313,7 +280,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           controls: 0,
           enablejsapi: 1,
           origin: window.location.origin,
-          // Allow background playback
           playsinline: 1,
         },
         events: {
@@ -321,10 +287,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             e.target.setVolume(volume);
             e.target.playVideo();
             setIsPlaying(true);
-            // Start silent audio loop immediately — this is what keeps Android alive
-            silentAudioRef.current?.play().catch(() => {});
-            if (webAudioCleanupRef.current) webAudioCleanupRef.current();
-            webAudioCleanupRef.current = startWebAudioKeepalive();
+            startSilentAudio();
+            startKeepalive();
             requestWakeLock();
           },
           onStateChange: (e: any) => {
@@ -334,27 +298,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               setDuration(dur);
               clearInterval(intervalRef.current);
               intervalRef.current = setInterval(() => {
-                const t = e.target.getCurrentTime();
-                setCurrentTime(t);
+                setCurrentTime(e.target.getCurrentTime());
               }, 500);
               if ("mediaSession" in navigator)
                 navigator.mediaSession.playbackState = "playing";
-              // Keep silent audio and Web Audio alive
-              silentAudioRef.current?.play().catch(() => {});
-              if (!webAudioCleanupRef.current)
-                webAudioCleanupRef.current = startWebAudioKeepalive();
+              startSilentAudio();
+              startKeepalive();
               requestWakeLock();
             } else if (e.data === window.YT.PlayerState.PAUSED) {
               setIsPlaying(false);
               clearInterval(intervalRef.current);
               if ("mediaSession" in navigator)
                 navigator.mediaSession.playbackState = "paused";
+              stopKeepalive();
               releaseWakeLock();
             } else if (e.data === window.YT.PlayerState.ENDED) {
               setIsPlaying(false);
               clearInterval(intervalRef.current);
               if ("mediaSession" in navigator)
                 navigator.mediaSession.playbackState = "none";
+              stopKeepalive();
               releaseWakeLock();
               handleSongEndRef.current();
             }
@@ -362,7 +325,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         },
       });
     },
-    [ytReady, volume, requestWakeLock, releaseWakeLock],
+    [
+      ytReady,
+      volume,
+      requestWakeLock,
+      releaseWakeLock,
+      startSilentAudio,
+      startKeepalive,
+      stopKeepalive,
+    ],
   );
 
   const playSongInternal = useCallback(
@@ -404,9 +375,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       playerRef.current.pauseVideo();
     } else {
       playerRef.current.playVideo();
-      silentAudioRef.current?.play().catch(() => {});
+      startSilentAudio();
     }
-  }, [isPlaying]);
+  }, [isPlaying, startSilentAudio]);
 
   const seekTo = useCallback((time: number) => {
     if (!playerRef.current) return;
@@ -446,10 +417,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     return () => {
-      if (webAudioCleanupRef.current) webAudioCleanupRef.current();
+      stopKeepalive();
       releaseWakeLock();
     };
-  }, [releaseWakeLock]);
+  }, [releaseWakeLock, stopKeepalive]);
 
   const toggleShuffle = useCallback(() => setIsShuffle((s) => !s), []);
   const toggleRepeat = useCallback(() => {
@@ -486,7 +457,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-      {/* Hidden YouTube player iframe */}
+      {/* Hidden YouTube player */}
       <div
         id="yt-player"
         style={{
@@ -498,6 +469,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           opacity: 0,
           pointerEvents: "none",
         }}
+      />
+      {/*
+        Silent audio element in the DOM — this is the KEY to Android notification
+        controls and background playback. Android requires an <audio> element
+        actively playing to show Media Session controls in the notification shade.
+        /silence.wav is a proper 3-second looping WAV file (not a data URI).
+      */}
+      {/* biome-ignore lint/a11y/useMediaCaption: silent background audio, no captions needed */}
+      <audio
+        ref={silentAudioRef}
+        src="/silence.wav"
+        loop
+        playsInline
+        style={{ display: "none" }}
       />
     </PlayerContext.Provider>
   );

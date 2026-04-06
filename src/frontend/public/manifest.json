@@ -1,0 +1,29 @@
+{
+  "name": "Deeksplay",
+  "short_name": "Deeksplay",
+  "description": "Free ad-free music app by Deepak Katal from Punjab",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00ffff",
+  "lang": "en",
+  "categories": ["music", "entertainment"],
+  "icons": [
+    {
+      "src": "/assets/uploads/untitled8_20251128171756-3e28e96e-7cfc-70a2-a42a-7d9a82620fd0-1.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/uploads/untitled8_20251128171756-3e28e96e-7cfc-70a2-a42a-7d9a82620fd0-1.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}

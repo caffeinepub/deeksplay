@@ -485,7 +485,7 @@ export function SettingsPage() {
               style={{ borderBottom: "1px solid rgba(42,52,65,0.4)" }}
             >
               <span style={{ color: "#9AA6B2" }}>Version</span>
-              <span style={{ color: "#E9EEF6" }}>v34.0.0</span>
+              <span style={{ color: "#E9EEF6" }}>v39.0.0</span>
             </div>
             <div
               className="flex justify-between items-center py-2"

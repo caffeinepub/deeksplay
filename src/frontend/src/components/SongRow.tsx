@@ -1,4 +1,13 @@
-import { Heart, Pause, Play, Plus, Radio, Share2 } from "lucide-react";
+import {
+  Heart,
+  Pause,
+  Play,
+  Plus,
+  Radio,
+  Share2,
+  ThumbsDown,
+  ThumbsUp,
+} from "lucide-react";
 import { motion } from "motion/react";
 import type React from "react";
 import { useEffect, useState } from "react";
@@ -6,6 +15,7 @@ import { toast } from "sonner";
 import { usePlayer } from "../context/PlayerContext";
 import { useSearchYouTube } from "../hooks/useQueries";
 import type { Song } from "../types/music";
+import { type Rating, getRating, setRating } from "../utils/ratings";
 import { Equalizer } from "./Equalizer";
 
 interface SongRowProps {
@@ -49,6 +59,60 @@ function ArtistRadioButton({ song }: { song: Song }) {
     >
       <Radio size={13} />
     </button>
+  );
+}
+
+function RatingButtons({ song }: { song: Song }) {
+  const [rating, setRatingState] = useState<Rating>(() => getRating(song.id));
+
+  const handleRating = (e: React.MouseEvent, newRating: "like" | "dislike") => {
+    e.stopPropagation();
+    const next: Rating = rating === newRating ? null : newRating;
+    setRating(song.id, next);
+    setRatingState(next);
+    if (next === "like") toast.success("👍 Liked!", { duration: 1500 });
+    else if (next === "dislike") toast("👎 Disliked", { duration: 1500 });
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => handleRating(e, "like")}
+        title="Like"
+        className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
+        style={{
+          color: rating === "like" ? "#23E6E2" : "#9AA6B2",
+          filter:
+            rating === "like"
+              ? "drop-shadow(0 0 4px rgba(35,230,226,0.8))"
+              : "none",
+        }}
+      >
+        <ThumbsUp
+          size={12}
+          fill={rating === "like" ? "currentColor" : "none"}
+        />
+      </button>
+      <button
+        type="button"
+        onClick={(e) => handleRating(e, "dislike")}
+        title="Dislike"
+        className="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
+        style={{
+          color: rating === "dislike" ? "#FF4FD8" : "#9AA6B2",
+          filter:
+            rating === "dislike"
+              ? "drop-shadow(0 0 4px rgba(255,79,216,0.8))"
+              : "none",
+        }}
+      >
+        <ThumbsDown
+          size={12}
+          fill={rating === "dislike" ? "currentColor" : "none"}
+        />
+      </button>
+    </>
   );
 }
 
@@ -136,7 +200,9 @@ export function SongRow({
           <Heart size={14} fill={isFavorite ? "#FF4FD8" : "none"} />
         </button>
       )}
+      {/* Rating buttons + actions (visible on hover) */}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <RatingButtons song={song} />
         <ArtistRadioButton song={song} />
         <button
           type="button"

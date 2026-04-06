@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { usePlayer } from "../context/PlayerContext";
 import { useTheme } from "../context/ThemeContext";
 import { Equalizer } from "./Equalizer";
+import { EQButton } from "./EqualizerPanel";
 
 function formatTime(s: number) {
   if (!s || Number.isNaN(s)) return "0:00";

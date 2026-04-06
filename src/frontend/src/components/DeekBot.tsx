@@ -38,7 +38,6 @@ export function DeekBot() {
   isPlayingRef.current = isPlaying;
 
   // Pick a new random target every 3-6 seconds when not minimized
-  // biome-ignore lint/correctness/useExhaustiveDependencies: minimized is the only meaningful dep here
   useEffect(() => {
     if (minimized) return;
     const schedule = () => {
